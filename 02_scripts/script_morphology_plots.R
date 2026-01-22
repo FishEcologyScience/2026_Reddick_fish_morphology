@@ -18,105 +18,62 @@
 ## --------------------------------------------------------------#
 
 
-## Load Packages
-## ----------------------------#
-library('tidyverse')
-library('readxl')
-library('lubridate')
+## Packages
+library(tidyverse)
+library(readxl)
+library(lubridate)
 
-
-## Adjust Settings (optional)
-## ----------------------------#
-# theme_set(theme_classic())    # uncomment if you want a global ggplot theme
 options(scipen = 999)
-param_seed <- 1987
-plots <- list()
 
+## User inputs
+param_species_vec    <- c("Rudd", "Goldfish", "Carp")
+param_recursive_read <- FALSE
 
-## User Inputs
-## ----------------------------#
-# ⚠️ Folder names under '01_data/01_raw_files/Species/' must match exactly.
-species_vec <- c("Rudd", "Goldfish", "Carp")   # <- edit this list as needed
-recursive_read <- FALSE                        # TRUE if .xlsx are in subfolders per species
+## Paths
+path_data_root  <- "01_data"
+path_raw_root   <- file.path(path_data_root, "01_raw_files", "Species")
+path_figs_dir   <- file.path("03_outputs", "01_figures")
+path_tables_dir <- file.path("03_outputs", "01_tables")
 
+## In-memory combined outputs
+df_combined_summary <- tibble()
+df_combined_models  <- tibble()
 
-## Canonical Paths
-## ----------------------------#
-data_root  <- "01_data"
-raw_root   <- file.path(data_root, "01_raw_files", "Species")
-figs_dir   <- file.path("03_outputs", "01_figures")
-tables_dir <- file.path("03_outputs", "01_tables")
-
-dir.create(figs_dir,   recursive = TRUE, showWarnings = FALSE)
-dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
-
-
-## Holders for combined outputs (across species)
-## ----------------------------#
-combined_summary_list <- list()
-combined_model_list   <- list()
-
-
-## Loop through species (no custom functions)
-## ----------------------------#
-for (sp in species_vec) {
+## Loop
+for (param_species in param_species_vec) {
  
- message("\n--- Processing species: ", sp, " ---")
+ cat("\n--- Processing:", param_species, "---\n")
  
- # Paths specific to this species
- raw_dir       <- file.path(raw_root, sp)
- processed_dir <- file.path(data_root, "02_processed_files", sp)
+ path_raw_dir       <- file.path(path_raw_root, param_species)
+ path_processed_dir <- file.path(path_data_root, "02_processed_files", param_species)
  
- # Ensure dirs exist
- if (!dir.exists(raw_dir)) {
-  warning("Raw data directory does not exist for ", sp, ": ", raw_dir, ". Skipping this species.")
-  next
- }
- dir.create(processed_dir, recursive = TRUE, showWarnings = FALSE)
+ if (!dir.exists(path_raw_dir)) { cat("WARNING: missing raw dir:", path_raw_dir, "\n"); next }
  
- # 1) Read & Combine Excel files
- raw_files <- list.files(
-  raw_dir,
-  pattern = "\\.xlsx$",
-  ignore.case = TRUE,
-  full.names = TRUE,
-  recursive = recursive_read
- )
+ ## Read & combine
+ temp_raw_files <- list.files(path_raw_dir, "\\.xlsx$", ignore.case = TRUE,
+                              full.names = TRUE, recursive = param_recursive_read)
+ if (length(temp_raw_files) == 0) { cat("WARNING: no .xlsx in:", path_raw_dir, "\n"); next }
  
- if (length(raw_files) == 0) {
-  warning("No Excel (.xlsx) files found for ", sp, " in: ", raw_dir, ". Skipping this species.")
-  next
- }
+ cat("Found", length(temp_raw_files), "files; combining…\n")
+ temp_df_list    <- lapply(temp_raw_files, readxl::read_excel)
+ df_raw_combined <- dplyr::bind_rows(temp_df_list)
  
- message("Found ", length(raw_files), " Excel files for ", sp, ". Combining...")
- df_list    <- lapply(raw_files, readxl::read_excel)
- data_field <- bind_rows(df_list)
- 
- # 2) Minimal cleaning
- clean_df <- data_field %>%
+ ## Clean
+ df_clean <- df_raw_combined %>%
   mutate(
    ForkLength_mm = suppressWarnings(as.numeric(ForkLength_mm)),
    Width_mm      = suppressWarnings(as.numeric(Width_mm)),
    Mass_g        = suppressWarnings(as.numeric(Mass_g))
   )
  
- # Optional: column check
- required_cols <- c("ForkLength_mm", "Width_mm", "Mass_g")
- missing <- setdiff(required_cols, names(clean_df))
- if (length(missing)) {
-  warning("Missing required columns for ", sp, ": ", paste(missing, collapse = ", "),
-          ". Skipping this species.")
-  next
- }
+ temp_required_cols <- c("ForkLength_mm", "Width_mm", "Mass_g")
+ temp_missing <- setdiff(temp_required_cols, names(df_clean))
+ if (length(temp_missing)) { cat("WARNING: missing cols:", paste(temp_missing, collapse = ", "), "\n"); next }
  
- # 3) Save cleaned data
- clean_rds_path <- file.path(processed_dir, paste0(sp, "_clean.rds"))
- saveRDS(clean_df, clean_rds_path)
- 
- # 4) Summary table (per species)
- summary_tbl <- clean_df %>%
+ ## Summary (kept in memory)
+ df_summary <- df_clean %>%
   summarise(
-   species       = sp,
+   species       = param_species,
    n_rows        = n(),
    n_FL          = sum(!is.na(ForkLength_mm)),
    n_width       = sum(!is.na(Width_mm)),
@@ -125,133 +82,136 @@ for (sp in species_vec) {
    width_mean_mm = mean(Width_mm,      na.rm = TRUE),
    weight_mean_g = mean(Mass_g,        na.rm = TRUE)
   )
+ df_combined_summary <- dplyr::bind_rows(df_combined_summary, df_summary)
  
- species_summary_csv <- file.path(tables_dir, paste0(sp, "_summary.csv"))
- readr::write_csv(summary_tbl, species_summary_csv)
- combined_summary_list[[sp]] <- summary_tbl
+ make_caption <- function(df, text) paste0(param_species, " (n = ", nrow(df), "): ", text)
  
- # 5) Plot 1: Width vs Fork Length
- caption_n <- function(df, text) paste0(sp, " (n = ", nrow(df), "): ", text)
+ ## Plot 1 — Width vs Fork Length (linear fit + equation)
+ df_scatter_fl <- df_clean %>% filter(!is.na(Width_mm), !is.na(ForkLength_mm))
  
- df_scatter_fl <- clean_df %>%
-  filter(!is.na(Width_mm), !is.na(ForkLength_mm))
- 
- p_scatter_fl <- ggplot(df_scatter_fl, aes(x = ForkLength_mm, y = Width_mm)) +
-  geom_point(color = "#2c7fb8", alpha = 0.6, size = 2) +
-  labs(
-   title   = paste0(sp, " - Width by Fork Length"),
-   x       = "Fork Length (mm)",
-   y       = "Width (mm)",
-   caption = caption_n(df_scatter_fl, "Width plotted against fork length.")
-  ) +
-  theme_minimal()
- 
- file_fl <- file.path(figs_dir, paste0(sp, "_scatter_width_by_forklength.png"))
- ggsave(filename = file_fl, plot = p_scatter_fl, width = 7, height = 5, dpi = 300)
- 
- # 6) Plot 2: Width vs Mass (logarithmic fit + equation)
- df_scatter_mass <- clean_df %>%
-  filter(!is.na(Width_mm), !is.na(Mass_g)) %>%
-  filter(Mass_g > 0)  # log requires positive mass
- 
- # Default, in case we can't fit a model
- model_row <- tibble(
-  species = sp,
-  alpha   = NA_real_,
-  beta    = NA_real_,
-  r2      = NA_real_
- )
- 
- if (nrow(df_scatter_mass) >= 3) {
+ if (nrow(df_scatter_fl) >= 2) {
+  temp_lm_fl  <- lm(Width_mm ~ ForkLength_mm, data = df_scatter_fl)
+  temp_coef   <- coef(temp_lm_fl)
+  temp_r2_fl  <- summary(temp_lm_fl)$r.squared
+  temp_slope  <- unname(temp_coef[["ForkLength_mm"]])
+  temp_int    <- unname(temp_coef[["(Intercept)"]])
   
-  # Fit: Width = alpha * ln(Mass) + beta
-  log_fit <- lm(Width_mm ~ log(Mass_g), data = df_scatter_mass)
-  
-  x_rng <- range(df_scatter_mass$Mass_g, na.rm = TRUE)
-  x_seq <- seq(x_rng[1], x_rng[2], length.out = 200)
-  
-  pred_df <- tibble(Mass_g = x_seq) %>%
-   mutate(Width_pred = predict(log_fit, newdata = tibble(Mass_g = Mass_g)))
-  
-  # Coefficients and R^2
-  coefs <- coef(log_fit)
-  alpha <- unname(coefs["log(Mass_g)"])
-  beta  <- unname(coefs["(Intercept)"])
-  r2    <- summary(log_fit)$r.squared
-  
-  model_row <- tibble(
-   species = sp,
-   alpha   = alpha,
-   beta    = beta,
-   r2      = r2
+  temp_eq_fl <- paste0(
+   "y = ", formatC(temp_slope, format = "f", digits = 2),
+   "x", ifelse(temp_int >= 0, " + ", " - "),
+   formatC(abs(temp_int), format = "f", digits = 2),
+   "\nR^2 = ", formatC(temp_r2_fl, format = "f", digits = 4)
   )
   
-  # Equation label: y = 11.97 ln(x) - 31.54   R^2 = 0.9819
-  alpha_lab <- formatC(alpha, format = "f", digits = 2)
-  beta_lab  <- formatC(abs(beta), format = "f", digits = 2)
-  sign_beta <- ifelse(beta >= 0, " + ", " - ")
-  r2_lab    <- formatC(r2, format = "f", digits = 4)
-  eq_label  <- paste0("y = ", alpha_lab, " ln(x)", sign_beta, beta_lab, "\nR^2 = ", r2_lab)
+  temp_xpos_fl <- quantile(df_scatter_fl$ForkLength_mm, 0.05, na.rm = TRUE)
+  temp_ypos_fl <- quantile(df_scatter_fl$Width_mm,       0.95, na.rm = TRUE)
   
-  x_pos <- quantile(df_scatter_mass$Mass_g, 0.05, na.rm = TRUE)
-  y_pos <- quantile(df_scatter_mass$Width_mm, 0.95, na.rm = TRUE)
-  
-  p_scatter_mass <- ggplot(df_scatter_mass, aes(x = Mass_g, y = Width_mm)) +
-   geom_point(color = "#f16913", alpha = 0.6, size = 2) +
-   geom_line(data = pred_df, aes(x = Mass_g, y = Width_pred),
-             color = "#cc4c02", linewidth = 1) +
-   annotate("text", x = x_pos, y = y_pos, label = eq_label,
+  p_scatter_fl <- ggplot(df_scatter_fl, aes(ForkLength_mm, Width_mm)) +
+   geom_point(color = "#2c7fb8", alpha = 0.6, size = 2) +
+   geom_smooth(method = "lm", se = FALSE, color = "#1f78b4", linewidth = 0.9) +
+   annotate("text", x = temp_xpos_fl, y = temp_ypos_fl, label = temp_eq_fl,
             hjust = 0, vjust = 1, size = 3.5) +
    labs(
-    title   = paste0(sp, " - Width by Mass"),
-    x       = "Mass (g)",
+    title   = paste0(param_species, " - Width by Fork Length"),
+    x       = "Fork Length (mm)",
     y       = "Width (mm)",
-    caption = caption_n(df_scatter_mass, "Width vs mass with logarithmic fit.")
+    caption = make_caption(df_scatter_fl, "Width vs fork length (linear fit).")
    ) +
    theme_minimal()
-  
  } else {
-  warning("Not enough non-missing Mass/Width pairs to fit a logarithmic model for ", sp)
-  p_scatter_mass <- ggplot(df_scatter_mass, aes(x = Mass_g, y = Width_mm)) +
-   geom_point(color = "#f16913", alpha = 0.6, size = 2) +
+  p_scatter_fl <- ggplot(df_scatter_fl, aes(ForkLength_mm, Width_mm)) +
+   geom_point(color = "#2c7fb8", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(sp, " - Width by Mass"),
-    x       = "Mass (g)",
+    title   = paste0(param_species, " - Width by Fork Length"),
+    x       = "Fork Length (mm)",
     y       = "Width (mm)",
-    caption = caption_n(df_scatter_mass, "Width plotted against mass.")
+    caption = make_caption(df_scatter_fl, "Width vs fork length.")
    ) +
    theme_minimal()
  }
+ p_scatter_fl
+ # path_file_fl <- file.path(path_figs_dir, paste0(param_species, "_scatter_width_by_forklength.png"))
+ # ggsave(filename = path_file_fl, plot = p_scatter_fl, width = 7, height = 5, dpi = 300)
  
- file_mass <- file.path(figs_dir, paste0(sp, "_scatter_width_by_mass.png"))
- ggsave(filename = file_mass, plot = p_scatter_mass, width = 7, height = 5, dpi = 300)
+ ## Plot 2 — Width vs Mass (log fit + equation)
+ df_scatter_mass <- df_clean %>% filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0)
  
- # Keep combined outputs
- combined_model_list[[sp]] <- model_row
+ temp_model_row <- tibble(species = param_species, alpha = NA_real_, beta = NA_real_, r2 = NA_real_)
  
- message("Finished: ", sp)
+ if (nrow(df_scatter_mass) >= 3) {
+  temp_log_fit <- lm(Width_mm ~ log(Mass_g), data = df_scatter_mass)
+  
+  temp_coefs <- coef(temp_log_fit)
+  temp_alpha <- unname(temp_coefs["log(Mass_g)"])
+  temp_beta  <- unname(temp_coefs["(Intercept)"])
+  temp_r2_m  <- summary(temp_log_fit)$r.squared
+  
+  temp_model_row <- tibble(species = param_species, alpha = temp_alpha, beta = temp_beta, r2 = temp_r2_m)
+  
+  temp_eq_m <- paste0(
+   "y = ", formatC(temp_alpha, format = "f", digits = 2),
+   " ln(x)", ifelse(temp_beta >= 0, " + ", " - "),
+   formatC(abs(temp_beta), format = "f", digits = 2),
+   "\nR^2 = ", formatC(temp_r2_m, format = "f", digits = 4)
+  )
+  
+  temp_xrng <- range(df_scatter_mass$Mass_g, na.rm = TRUE)
+  temp_xseq <- seq(temp_xrng[1], temp_xrng[2], length.out = 200)
+  df_pred   <- tibble(Mass_g = temp_xseq) %>%
+   mutate(Width_pred = predict(temp_log_fit, newdata = tibble(Mass_g = Mass_g)))
+  
+  temp_xpos_m <- quantile(df_scatter_mass$Mass_g, 0.05, na.rm = TRUE)
+  temp_ypos_m <- quantile(df_scatter_mass$Width_mm, 0.95, na.rm = TRUE)
+  
+  p_scatter_mass <- ggplot(df_scatter_mass, aes(Mass_g, Width_mm)) +
+   geom_point(color = "#f16913", alpha = 0.6, size = 2) +
+   geom_line(data = df_pred, aes(Mass_g, Width_pred), color = "#cc4c02", linewidth = 1) +
+   annotate("text", x = temp_xpos_m, y = temp_ypos_m, label = temp_eq_m,
+            hjust = 0, vjust = 1, size = 3.5) +
+   labs(
+    title   = paste0(param_species, " - Width by Mass"),
+    x       = "Mass (g)",
+    y       = "Width (mm)",
+    caption = make_caption(df_scatter_mass, "Width vs mass (logarithmic fit).")
+   ) +
+   theme_minimal()
+ } else {
+  p_scatter_mass <- ggplot(df_scatter_mass, aes(Mass_g, Width_mm)) +
+   geom_point(color = "#f16913", alpha = 0.6, size = 2) +
+   labs(
+    title   = paste0(param_species, " - Width by Mass"),
+    x       = "Mass (g)",
+    y       = "Width (mm)",
+    caption = make_caption(df_scatter_mass, "Width vs mass.")
+   ) +
+   theme_minimal()
+ }
+ p_scatter_mass
+ # path_file_mass <- file.path(path_figs_dir, paste0(param_species, "_scatter_width_by_mass.png"))
+ # ggsave(filename = path_file_mass, plot = p_scatter_mass, width = 7, height = 5, dpi = 300)
+ 
+ ## (Optional) per-species file saves — commented on purpose
+ # path_clean_rds <- file.path(path_processed_dir, paste0(param_species, "_clean.rds"))
+ # saveRDS(df_clean, path_clean_rds)
+ # path_species_summary_csv <- file.path(path_tables_dir, paste0(param_species, "_summary.csv"))
+ # readr::write_csv(df_summary, path_species_summary_csv)
+ 
+ ## Keep combined model row
+ df_combined_models <- dplyr::bind_rows(df_combined_models, temp_model_row)
+ 
+ cat("Finished:", param_species, "\n")
 }
 
+## (Optional) combined table saves — commented on purpose
+# path_combined_summary_csv <- file.path(path_tables_dir, "_combined_summary_by_species.csv")
+# readr::write_csv(df_combined_summary, path_combined_summary_csv)
+# path_combined_models_csv  <- file.path(path_tables_dir, "_combined_log_model_coefficients.csv")
+# readr::write_csv(df_combined_models,  path_combined_models_csv)
 
-## Write combined tables (across species)
-## ----------------------------#
-if (length(combined_summary_list) > 0) {
- combined_summary <- bind_rows(combined_summary_list)
- combined_summary_csv <- file.path(tables_dir, "_combined_summary_by_species.csv")
- readr::write_csv(combined_summary, combined_summary_csv)
- message("Combined summary written: ", combined_summary_csv)
-} else {
- warning("No per-species summaries were produced. Check species and data.")
-}
+## Cleanup temporary objects
+temp_objects <- ls(pattern = "^temp_")
+if (length(temp_objects)) { rm(list = temp_objects); cat("Removed temporary objects.\n") }
 
-if (length(combined_model_list) > 0) {
- combined_models <- bind_rows(combined_model_list)
- combined_models_csv <- file.path(tables_dir, "_combined_log_model_coefficients.csv")
- readr::write_csv(combined_models, combined_models_csv)
- message("Combined model coefficients written: ", combined_models_csv)
-} else {
- warning("No per-species models were produced (model fit likely failed due to insufficient data).")
-}
+cat("\nAll done.\n")
 
-message("\nAll done.")
-
+  
