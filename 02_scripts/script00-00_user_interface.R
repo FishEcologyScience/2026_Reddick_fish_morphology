@@ -21,7 +21,7 @@
 ### Core Data Processing
 #----------------------------#
 source("02_scripts/script00-01_load_packages.R") # Load packages and helper functions first 
-
+source("02_scripts/script01-01_morphology_plots.R") #Run loop - per species to generate summary plots.
 
 
 
