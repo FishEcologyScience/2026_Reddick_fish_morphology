@@ -51,6 +51,10 @@ path_tables_dir <- file.path("03_outputs", "01_tables")
 df_combined_summary <- tibble()
 df_combined_models  <- tibble()
 
+plots <- list()   # container for all plots (per species)
+
+# Container to build a combined dataset for multi-species plots
+combined_all <- list()
 
 #####Species Processing Loop###################################----
 #-------------------------------------------------------------#
@@ -131,6 +135,10 @@ for (param_species in param_species_vec) {
 
  # Helper function to generate standardized plot captions
  make_caption <- function(df, text) paste0(param_species, " (n = ", nrow(df), "): ", text)
+ 
+ # Keep a copy for multi-species plots (ensure Species column exists)
+ if (!"Species" %in% names(df_clean)) df_clean$Species <- param_species
+ combined_all[[param_species]] <- df_clean %>% dplyr::mutate(Species = param_species)
 
 
  #####Visualization############################################----
@@ -259,6 +267,96 @@ for (param_species in param_species_vec) {
  # Store plot in species sublist
  # Access later via: plots$Rudd$scatter_mass, plots$Goldfish$scatter_mass, etc.
  plots[[param_species]]$scatter_mass <- p_scatter_mass
+ 
+ ### Plot 3: log(Width) ~ log(Fork Length) (Log-Log)
+ #-----------------------------------------#
+ df_loglog_fl <- df_clean %>%
+  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
+                !is.na(ForkLength_mm), ForkLength_mm > 0)
+ 
+ p_loglog_fl <- ggplot(df_loglog_fl, aes(ForkLength_mm, Width_mm)) +
+  geom_point(color = "#4daf4a", alpha = 0.6, size = 2) +
+  scale_x_log10() + scale_y_log10() +
+  labs(
+   title   = paste0(param_species, " - log(Width) ~ log(Fork Length)"),
+   x       = "Fork Length (mm, log10 scale)",
+   y       = "Width (mm, log10 scale)",
+   caption = make_caption(df_loglog_fl, "log(Width) vs log(ForkLength).")
+  ) +
+  theme_minimal()
+ 
+ if (nrow(df_loglog_fl) >= 3) {
+  temp_fit_ll <- lm(log(Width_mm) ~ log(ForkLength_mm), data = df_loglog_fl)
+  temp_coefs  <- coef(temp_fit_ll)
+  temp_r2_ll  <- summary(temp_fit_ll)$r.squared
+  temp_slope  <- unname(temp_coefs[["log(ForkLength_mm)"]])
+  temp_int    <- unname(temp_coefs[["(Intercept)"]])
+  
+  # Prediction line (drawn on original scale, using log-fit)
+  rng_x <- range(df_loglog_fl$ForkLength_mm, na.rm = TRUE)
+  xseq  <- seq(rng_x[1], rng_x[2], length.out = 200)
+  df_pred_ll <- tibble(ForkLength_mm = xseq) %>%
+   dplyr::mutate(Width_pred = exp(temp_int + temp_slope * log(ForkLength_mm)))
+  
+  p_loglog_fl <- p_loglog_fl +
+   geom_line(data = df_pred_ll, aes(ForkLength_mm, Width_pred),
+             color = "#238b45", linewidth = 1) +
+   annotate("text",
+            x = quantile(df_loglog_fl$ForkLength_mm, 0.05, na.rm = TRUE),
+            y = quantile(df_loglog_fl$Width_mm,       0.95, na.rm = TRUE),
+            label = paste0("log(y) = ", formatC(temp_slope, format = "f", digits = 2),
+                           " log(x) ", ifelse(temp_int >= 0, "+ ", "- "),
+                           formatC(abs(temp_int), format = "f", digits = 2),
+                           "\nR^2 = ", formatC(temp_r2_ll, format = "f", digits = 4)),
+            hjust = 0, vjust = 1, size = 3.5)
+ }
+ 
+ plots[[param_species]]$loglog_width_by_FL <- p_loglog_fl
+ 
+ ### Plot 4: Power law fit (Width ~ Mass^b) via log(Width) ~ log(Mass)
+ #-----------------------------------------#
+ df_power_mass <- df_clean %>%
+  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
+                !is.na(Mass_g),   Mass_g > 0)
+ 
+ p_power_mass <- ggplot(df_power_mass, aes(Mass_g, Width_mm)) +
+  geom_point(color = "#984ea3", alpha = 0.6, size = 2) +
+  scale_x_log10() + scale_y_log10() +
+  labs(
+   title   = paste0(param_species, " - Power law: Width ~ Mass^b"),
+   x       = "Mass (g, log10 scale)",
+   y       = "Width (mm, log10 scale)",
+   caption = make_caption(df_power_mass, "Power-law width vs mass.")
+  ) +
+  theme_minimal()
+ 
+ if (nrow(df_power_mass) >= 3) {
+  temp_fit_pw <- lm(log(Width_mm) ~ log(Mass_g), data = df_power_mass)
+  temp_coefs  <- coef(temp_fit_pw)
+  temp_r2_pw  <- summary(temp_fit_pw)$r.squared
+  temp_b      <- unname(temp_coefs[["log(Mass_g)"]])     # exponent b
+  temp_log_a  <- unname(temp_coefs[["(Intercept)"]])
+  temp_a      <- exp(temp_log_a)
+  
+  rng_x <- range(df_power_mass$Mass_g, na.rm = TRUE)
+  xseq  <- seq(rng_x[1], rng_x[2], length.out = 200)
+  df_pred_pw <- tibble(Mass_g = xseq) %>%
+   dplyr::mutate(Width_pred = temp_a * (Mass_g ^ temp_b))
+  
+  p_power_mass <- p_power_mass +
+   geom_line(data = df_pred_pw, aes(Mass_g, Width_pred),
+             color = "#6a51a3", linewidth = 1) +
+   annotate("text",
+            x = quantile(df_power_mass$Mass_g, 0.05, na.rm = TRUE),
+            y = quantile(df_power_mass$Width_mm, 0.95, na.rm = TRUE),
+            label = paste0("y = ", formatC(temp_a, format = "f", digits = 2),
+                           " x^", formatC(temp_b, format = "f", digits = 2),
+                           "\nR^2 = ", formatC(temp_r2_pw, format = "f", digits = 4)),
+            hjust = 0, vjust = 1, size = 3.5)
+ }
+ 
+ plots[[param_species]]$powerlaw_width_by_mass <- p_power_mass
+ 
 
  # Optional: Save plot to file (uncomment to enable export)
  # path_file_mass <- file.path(path_figs_dir, paste0(param_species, "_scatter_width_by_mass.png"))
@@ -288,6 +386,57 @@ for (param_species in param_species_vec) {
 
 } # End species loop
 
+# Build combined dataset for multi-species plots
+df_all <- dplyr::bind_rows(combined_all, .id = "species_key") %>%
+ dplyr::mutate(Species = ifelse(!is.na(Species), Species, species_key)) %>%
+ dplyr::select(-species_key)
+
+# Multi-species: Width ~ Fork Length (linear)
+df_all1 <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
+plots$combined$width_by_FL <- ggplot(df_all1, aes(ForkLength_mm, Width_mm, color = Species)) +
+ geom_point(alpha = 0.5, size = 1.8) +
+ geom_smooth(method = "lm", se = FALSE) +
+ labs(title = "All species - Width by Fork Length (linear)",
+      x = "Fork Length (mm)", y = "Width (mm)") +
+ theme(legend.position = "bottom")
+
+# Multi-species: Width ~ log(Mass)
+df_all2 <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0)
+plots$combined$width_by_mass_logx <- ggplot(df_all2, aes(Mass_g, Width_mm, color = Species)) +
+ geom_point(alpha = 0.5, size = 1.8) +
+ stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE) +
+ labs(title = "All species - Width by Mass (log x)",
+      x = "Mass (g)", y = "Width (mm)") +
+ theme(legend.position = "bottom")
+
+# Multi-species: log(Width) ~ log(Fork Length)
+df_all3 <- df_all %>% dplyr::filter(!is.na(Width_mm), Width_mm > 0,
+                                    !is.na(ForkLength_mm), ForkLength_mm > 0)
+plots$combined$loglog_width_by_FL <- ggplot(df_all3, aes(ForkLength_mm, Width_mm, color = Species)) +
+ geom_point(alpha = 0.5, size = 1.8) +
+ scale_x_log10() + scale_y_log10() +
+ stat_smooth(method = "lm",
+             formula = y ~ x, se = FALSE,
+             mapping = aes(x = log(ForkLength_mm), y = log(Width_mm)),
+             inherit.aes = FALSE, color = "black") +
+ labs(title = "All species - log(Width) ~ log(Fork Length)",
+      x = "Fork Length (mm, log10 scale)", y = "Width (mm, log10 scale)") +
+ theme(legend.position = "bottom")
+
+# Multi-species: Power law (Width ~ Mass^b)
+df_all4 <- df_all %>% dplyr::filter(!is.na(Width_mm), Width_mm > 0,
+                                    !is.na(Mass_g),   Mass_g > 0)
+plots$combined$powerlaw_width_by_mass <- ggplot(df_all4, aes(Mass_g, Width_mm, color = Species)) +
+ geom_point(alpha = 0.5, size = 1.8) +
+ scale_x_log10() + scale_y_log10() +
+ stat_smooth(method = "lm",
+             formula = y ~ x, se = FALSE,
+             mapping = aes(x = log(Mass_g), y = log(Width_mm)),
+             inherit.aes = FALSE, color = "black") +
+ labs(title = "All species - Power law: Width ~ Mass^b",
+      x = "Mass (g, log10 scale)", y = "Width (mm, log10 scale)") +
+ theme(legend.position = "bottom")
+
 #Display all plots
 print(plots)
 
@@ -313,6 +462,7 @@ temp_objects <- ls(pattern = "^temp_")
 if (length(temp_objects)) { rm(list = temp_objects); cat("Removed temporary objects.\n") }
 
 cat("\nAll done.\n")
+
 
 # Objects retained in environment after script completion:
 #   - df_combined_summary: Summary statistics for all species
