@@ -21,7 +21,7 @@
 ### Core Data Processing
 #----------------------------#
 source("02_scripts/script00-01_load_packages.R") # Load packages and helper functions first 
-source("02_scripts/script01-01_import_format.R") # Import and clean morphometric data 
+source("02_scripts/script01-01_import_format_singlefile.R") # Import and clean morphometric data 
 source("02_scripts/script01-02_morphology_plots.R") # Run loop - per species to generate summary plots
 
 
