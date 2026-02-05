@@ -1,5 +1,5 @@
 ## --------------------------------------------------------------#
-## Script name: script01-01_import_format.R
+## Script name: script01-01_import_format_from_species_subfolders.R
 ##
 ## Purpose:
 ##   - Read raw morphometric Excel files for each species
