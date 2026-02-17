@@ -43,8 +43,6 @@ df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) m
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
 
-# Initialize QC flags table (e.g., multiple linear regimes per species)
-df_qc_flags <- tibble()
 
 # Sanitize species names in case of empty keys (defensive against zero-length names)
 sp_names <- names(combined_all)
@@ -365,26 +363,40 @@ for (param_species in names(combined_all)) {
   loop_iqr     <- stats::IQR(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   loop_n       <- nrow(loop_hist_df)
   loop_bw_fd   <- if (loop_n > 1) 2 * loop_iqr / (loop_n)^(1/3) else NA_real_
-  loop_bw_safe <- if (is.finite(loop_bw_fd) && loop_bw_fd > 0) loop_bw_fd else 5  # default to 5 mm
+  loop_bw_safe <- if (is.finite(loop_bw_fd) && loop_bw_fd > 0) loop_bw_fd else 5
   
   loop_fl_mean   <- mean(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
    geom_histogram(binwidth = loop_bw_safe, boundary = 0, color = "grey30", fill = "#74a9cf", alpha = 0.8) +
-   geom_vline(aes(xintercept = loop_fl_mean),   color = "#de2d26", linetype = "solid",  linewidth = 0.7) +
-   geom_vline(aes(xintercept = loop_fl_median), color = "#238b45", linetype = "dashed", linewidth = 0.7) +
+   annotate("segment",
+            x = loop_fl_mean, xend = loop_fl_mean,
+            y = -Inf, yend = Inf,
+            colour = "#de2d26", linetype = "solid", linewidth = 1.0, lineend = "butt") +
+   annotate("segment",
+            x = loop_fl_median, xend = loop_fl_median,
+            y = -Inf, yend = Inf,
+            colour = "#238b45", linetype = "dashed", linewidth = 1.0, lineend = "butt") +
+  
    labs(
     title   = paste0(param_species, " - Histogram of Fork Length"),
     x       = "Fork Length (mm)",
     y       = "Count",
     caption = make_caption(
      loop_hist_df,
-     paste0("Histogram of fork lengths. Binwidth ≈ ", formatC(loop_bw_safe, digits = 2, format = "f"),
-            " mm. Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
-            " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."),
+     paste0(
+      "Histogram of fork lengths. Binwidth ≈ ", formatC(loop_bw_safe, digits = 2, format = "f"),
+      " mm. Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+      " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
+     ),
      param_species
     )
+   ) +
+   scale_x_continuous(
+    breaks = scales::breaks_width(50),
+    minor_breaks = scales::breaks_width(25),
+    expand = c(0.01, 0)
    ) +
    theme_minimal()
   
@@ -393,42 +405,6 @@ for (param_species in names(combined_all)) {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_hist_df, "No fork length data available.", param_species))
  }
- 
- # ---- QC: multiple linear relationships (heuristic) ----
- # K-means clusters over FL; fit slopes per cluster; flag if slopes differ markedly (>= 50%).
- loop_qc_pairs <- df_clean %>% dplyr::filter(!is.na(ForkLength_mm), !is.na(Width_mm))
- flag_multiple_linear <- NA
- 
- if (nrow(loop_qc_pairs) >= max(MIN_N_PER_SPECIES, 12)) {
-  set.seed(1)
-  kcl <- try(kmeans(loop_qc_pairs$ForkLength_mm, centers = 2), silent = TRUE)
-  if (!inherits(kcl, "try-error")) {
-   loop_qc_pairs$k <- factor(kcl$cluster)
-   sizes <- table(loop_qc_pairs$k)
-   
-   if (all(sizes >= 5)) {
-    slope_by_k <- by(loop_qc_pairs, loop_qc_pairs$k, function(dd) {
-     co <- coef(lm(Width_mm ~ ForkLength_mm, data = dd))
-     data.frame(slope = unname(co["ForkLength_mm"]),
-                r2    = summary(lm(Width_mm ~ ForkLength_mm, data = dd))$r.squared)
-    })
-    slope_df <- do.call(rbind, slope_by_k)
-    if (nrow(slope_df) == 2 && all(is.finite(slope_df$slope))) {
-     slope_diff_ratio   <- abs(diff(slope_df$slope)) / mean(abs(slope_df$slope))
-     flag_multiple_linear <- is.finite(slope_diff_ratio) && (slope_diff_ratio >= 0.5) && all(slope_df$r2 >= 0.3)
-    }
-   }
-  }
- }
- 
- df_qc_flags <- dplyr::bind_rows(
-  df_qc_flags,
-  tibble(
-   species = param_species,
-   n_pairs_FL_Width = nrow(loop_qc_pairs),
-   flag_multiple_linear = if (is.na(flag_multiple_linear)) FALSE else flag_multiple_linear
-  )
- )
  
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
@@ -550,7 +526,6 @@ df_species_counts <- df_all %>%
 # ggsave(file.path(path_figs_dir, "combined_powerlaw_width_by_mass.png"), plots[["combined"]][["powerlaw_width_by_mass"]], width = 7, height = 5, dpi = 300)
 # ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 #        plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
-# readr::write_csv(df_qc_flags,        file.path(path_tables_dir, "_qc_flags_by_species.csv"))
 # readr::write_csv(df_species_counts,  file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present

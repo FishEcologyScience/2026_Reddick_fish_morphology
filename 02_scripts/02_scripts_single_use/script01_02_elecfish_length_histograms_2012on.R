@@ -9,7 +9,8 @@
 ##
 #### Repository layout (per template):
 ##   01_data/01_raw_files/          # raw ElecFish Excel export
-##   03_outputs/99_single_use/      # single-use exported figures + tables
+##   03_outputs/01_figures/         # figures
+##   03_outputs/01_tables/          # tables
 ##
 ## Author: Marcus Rizzuto
 ## Date Created: 2/4/2026
@@ -128,44 +129,53 @@ species_vec <- sort(unique(df$Species[!is.na(df$Species) & nzchar(df$Species)]))
 if (length(species_vec) == 0) {
  warning("No species found with valid positive lengths.")
 } else {
- for (sp in species_vec) {
-  df_sp <- dplyr::filter(df, Species == sp)
-  if (nrow(df_sp) < MIN_N_PER_SPECIES) {
-   message("Skipping ", sp, " (n = ", nrow(df_sp), " < ", MIN_N_PER_SPECIES, ").")
+ 
+ ##### PLOTTING LOOP — per-species length histograms #################
+ #-------------------------------------------------------------------#
+ for (loop_species in species_vec) {
+  loop_df <- dplyr::filter(df, Species == loop_species)
+  if (nrow(loop_df) < MIN_N_PER_SPECIES) {
+   message("Skipping ", loop_species, " (n = ", nrow(loop_df), " < ", MIN_N_PER_SPECIES, ").")
    next
   }
   
-  bw <- fd_binwidth(df_sp$Length_mm)
-  p  <- ggplot(df_sp, aes(x = Length_mm)) +
-   geom_histogram(binwidth = bw, boundary = 0,
+  loop_bw       <- fd_binwidth(loop_df$Length_mm)
+  loop_fl_mean   <- mean(loop_df$Length_mm, na.rm = TRUE)
+  loop_fl_median <- stats::median(loop_df$Length_mm, na.rm = TRUE)
+  
+  loop_p  <- ggplot(loop_df, aes(x = Length_mm)) +
+   geom_histogram(binwidth = loop_bw, boundary = 0,
                   color = "grey30", fill = "#74a9cf", alpha = 0.85) +
-   geom_vline(aes(xintercept = mean(Length_mm, na.rm = TRUE)),
-              color = "#de2d26", linewidth = 0.7) +
-   geom_vline(aes(xintercept = median(Length_mm, na.rm = TRUE)),
-              color = "#238b45", linetype = "dashed", linewidth = 0.7) +
+   geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
+   geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
    labs(
-    title    = paste0(sp, " — Length histogram (2012+)"),
-    subtitle = paste0("n = ", nrow(df_sp), " | binwidth ≈ ",
-                      formatC(bw, digits = 2, format = "f"), " mm"),
-    x = "Length (mm)", y = "Count"
+    title   = paste0(loop_species, " — Length histogram (2012+)"),
+    x       = "Length (mm)",
+    y       = "Count",
+    caption = paste0(
+     loop_species, " (n = ", nrow(loop_df), "): ",
+     "Histogram of lengths. ",
+     "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+     " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
+    )
    ) +
    theme_minimal(base_size = 12)
   
   # Show the per-species plot in the RStudio Plots pane
-  print(p)
+  print(loop_p)
   
   # Optional: briefly pause so plots “tick by” when sourcing
   # Sys.sleep(0.15)
   
   
-  # Safe filename for species
-  sp_file <- sp %>%
+  # Safe filename for species (saving commented out)
+  loop_sp_file <- loop_species %>%
    stringr::str_replace_all("[^A-Za-z0-9]+", "_") %>%
    stringr::str_replace("^_+|_+$", "")
   
-  out_png <- file.path(out_dir_figs, paste0("hist_length_", sp_file, "_2012plus.png"))
-  ggsave(out_png, p, width = 7, height = 5, dpi = 300)
-  message("Saved: ", out_png)
+  loop_out_png <- file.path(out_dir_figs, paste0("hist_length_", loop_sp_file, "_2012plus.png"))
+  # ggsave(loop_out_png, loop_p, width = 7, height = 5, dpi = 300)
+  # message("Saved: ", loop_out_png)
  }
 }
 
@@ -189,8 +199,8 @@ if (nrow(df) > 0) {
  # Sys.sleep(0.25)
  
  out_png_all <- file.path(out_dir_figs, "hist_length_by_species_2012plus.png")
- ggsave(out_png_all, p_all, width = 10, height = 8, dpi = 300)
- message("Saved combined panel: ", out_png_all)
+ # ggsave(out_png_all, p_all, width = 10, height = 8, dpi = 300)
+ # message("Saved combined panel: ", out_png_all)
 }
 
 message("\nDone. Inspect figures in: ", normalizePath(out_dir_figs, mustWork = FALSE))
