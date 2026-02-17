@@ -31,7 +31,7 @@ suppressPackageStartupMessages({
  library(readr)
 })
 
-##### CONFIG — UPDATE THESE TO MATCH YOUR FILE ##########################
+##### CONFIG —  #########################################################
 #-----------------------------------------------------------------------#
 # Path to the ElecFish Excel export (already filtered to 2012+ upstream)
 path_elecfish_xlsx <- file.path("01_data", "01_raw_files", "lw_raw_elecfish_2012_on.xlsx")
@@ -45,6 +45,11 @@ COL_LENGTH_MM <- "Length"
 # Date is not required here since we’re not filtering by year, but keep if present
 COL_DATE      <- NULL             # e.g., "SampleDate" or NULL
 
+# Path to species lookup (two columns: Species, Common Name)
+path_species_lookup <- file.path("01_data", "01_raw_files", "species_lookup.xlsx")
+COL_SPECIES_ID      <- "Species"
+COL_COMMON_NAME     <- "Common Name"
+
 # Minimum observations required to plot a species histogram
 MIN_N_PER_SPECIES <- 5
 
@@ -55,6 +60,7 @@ out_dir_tables <- file.path("03_outputs", "01_tables")
 # Histogram defaults
 DEFAULT_BINS   <- 30
 FD_FALLBACK_MM <- 5               # fallback binwidth (mm) if FD binwidth can’t be computed
+
 
 ##### Create output directories ########################################
 #-----------------------------------------------------------------------#
@@ -96,6 +102,50 @@ if (!is.null(COL_DATE) && COL_DATE %in% names(df_raw)) {
  df <- df %>% mutate(Date = .data[[COL_DATE]])
 }
 
+# --- SPECIES LOOKUP + LABEL CREATION ---------------------------------
+
+message("Reading species lookup: ", normalizePath(path_species_lookup, mustWork = FALSE))
+
+lookup_raw <- readxl::read_excel(path_species_lookup)
+
+lookup_missing <- setdiff(c(COL_SPECIES_ID, COL_COMMON_NAME), names(lookup_raw))
+if (length(lookup_missing) > 0) {
+ stop("Lookup is missing required column(s): ", paste(lookup_missing, collapse = ", "))
+}
+
+lookup <- lookup_raw %>%
+ transmute(
+  Species_id  = !!rlang::sym(COL_SPECIES_ID) %>% as.character() %>% stringr::str_squish(),
+  Common_Name = !!rlang::sym(COL_COMMON_NAME) %>% as.character() %>% stringr::str_squish()
+ ) %>%
+ filter(!is.na(Species_id), nzchar(Species_id)) %>%
+ distinct(Species_id, .keep_all = TRUE)
+
+labvec <- setNames(
+ paste0(lookup$Species_id, " — ", lookup$Common_Name),
+ lookup$Species_id
+)
+
+# Also build a named vector for just the common name (names = Species_id)
+lab_common <- setNames(lookup$Common_Name, lookup$Species_id)
+
+# Helper to make file-system safe names from labels/common names
+make_safe_filename <- function(x, max_chars = 150) {
+ x %>%
+  stringr::str_to_lower() %>%
+  stringr::str_replace_all("[^A-Za-z0-9]+", "_") %>%
+  stringr::str_replace_all("_+", "_") %>%
+  stringr::str_replace("^_+|_+$", "") %>%
+  stringr::str_sub(1, max_chars)
+}
+
+df <- df %>%
+ mutate(
+  Species_label = dplyr::coalesce(labvec[Species], Species) %>% as.character()
+ )
+
+# ----------------------------------------------------------------------
+
 # Quick QC counts by species
 df_counts <- df %>%
  group_by(Species) %>%
@@ -134,6 +184,7 @@ if (length(species_vec) == 0) {
  #-------------------------------------------------------------------#
  for (loop_species in species_vec) {
   loop_df <- dplyr::filter(df, Species == loop_species)
+  loop_label <- dplyr::first(loop_df$Species_label)
   if (nrow(loop_df) < MIN_N_PER_SPECIES) {
    message("Skipping ", loop_species, " (n = ", nrow(loop_df), " < ", MIN_N_PER_SPECIES, ").")
    next
@@ -149,11 +200,9 @@ if (length(species_vec) == 0) {
    geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
    geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
    labs(
-    title   = paste0(loop_species, " — Length histogram (2012+)"),
-    x       = "Length (mm)",
-    y       = "Count",
+    title   = paste0(loop_label, " — Length histogram (2012+)"),
     caption = paste0(
-     loop_species, " (n = ", nrow(loop_df), "): ",
+     loop_label, " (n = ", nrow(loop_df), "): ",
      "Histogram of lengths. ",
      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
      " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
@@ -169,38 +218,14 @@ if (length(species_vec) == 0) {
   
   
   # Safe filename for species (saving commented out)
-  loop_sp_file <- loop_species %>%
-   stringr::str_replace_all("[^A-Za-z0-9]+", "_") %>%
-   stringr::str_replace("^_+|_+$", "")
-  
+  # Filename based on both ID and common name (avoids collisions)
+  loop_common <- dplyr::coalesce(lab_common[loop_species], loop_species) %>% as.character()
+  loop_sp_file <- make_safe_filename(paste(loop_species, loop_common, sep = "_"))
   loop_out_png <- file.path(out_dir_figs, paste0("hist_length_", loop_sp_file, "_2012plus.png"))
   # ggsave(loop_out_png, loop_p, width = 7, height = 5, dpi = 300)
-  # message("Saved: ", loop_out_png)
+ 
  }
 }
 
-##### Optional: combined faceted panel ###############################
-#-----------------------------------------------------------------------#
-if (nrow(df) > 0) {
- p_all <- ggplot(df, aes(x = Length_mm)) +
-  geom_histogram(color = "grey25", fill = "#9ecae1", bins = DEFAULT_BINS, boundary = 0) +
-  labs(
-   title = "ElecFish lengths by species (2012+)",
-   x = "Length (mm)", y = "Count"
-  ) +
-  facet_wrap(~ Species, scales = "free_y") +
-  theme_minimal(base_size = 11) +
-  theme(legend.position = "none")
- 
- # Show the combined panel in the RStudio Plots pane
- print(p_all)
- 
- # Optional: brief pause to view the combined panel
- # Sys.sleep(0.25)
- 
- out_png_all <- file.path(out_dir_figs, "hist_length_by_species_2012plus.png")
- # ggsave(out_png_all, p_all, width = 10, height = 8, dpi = 300)
- # message("Saved combined panel: ", out_png_all)
-}
 
 message("\nDone. Inspect figures in: ", normalizePath(out_dir_figs, mustWork = FALSE))
