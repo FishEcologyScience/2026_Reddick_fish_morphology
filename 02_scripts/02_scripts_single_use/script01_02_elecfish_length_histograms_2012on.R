@@ -17,6 +17,7 @@
 ##
 ## Notes:
 ##   - Single-use script (histograms only)
+##   - Goldfish (F0181) were sampled from June 19, 2012 through October 28, 2025 across spring, summer, and fall with summer most sampled (672 records; 54.7%), followed by fall (540; 44.0%) and spring (16; 1.3%). The full dataset contains 1,228 total goldfish records.  Sampling spans 39 unique transects, among rows with valid Time Period codes, effort was predominantly night (code 2: 922; 89.2%) vs. day (code 1: 112; 10.8%), with no crepuscular codes present and 194 rows missing a time‑period code.
 ##
 ## --------------------------------------------------------------#
 
@@ -43,7 +44,7 @@ excel_sheet_name <- NULL  # e.g., "Export" or 1
 COL_SPECIES   <- "Species"        # species/common/scientific name (pick one)
 COL_LENGTH_MM <- "Length"         
 # Date is not required here since we’re not filtering by year, but keep if present
-COL_DATE      <- NULL             # e.g., "SampleDate" or NULL
+COL_DATE      <- "Date"             
 
 # Path to species lookup (two columns: Species, Common Name)
 path_species_lookup <- file.path("01_data", "01_raw_files", "species_lookup.xlsx")
@@ -97,9 +98,24 @@ df <- df_raw %>%
  ) %>%
  filter(!is.na(Length_mm), Length_mm > 0)
 
-# Optional: if a date column exists and you want it preserved (not used for filtering)
+# --- DATE → MONTH → SEASON --------------------------------------------
+# Keep Date (if present) and derive Month and Season
 if (!is.null(COL_DATE) && COL_DATE %in% names(df_raw)) {
- df <- df %>% mutate(Date = .data[[COL_DATE]])
+ df <- df %>%
+  mutate(
+   Date  = as.POSIXct(.data[[COL_DATE]], tz = "UTC"),
+   Month = as.integer(format(Date, "%m")),
+   Season = case_when(
+    Month %in% c(5, 6)  ~ "Spring",   # May–June
+    Month %in% c(7, 8)  ~ "Summer",   # July–August
+    Month %in% c(9,10)  ~ "Fall",     # September–October
+    TRUE                ~ NA_character_
+   ),
+   Season = factor(Season, levels = c("Spring", "Summer", "Fall"))
+  )
+} else {
+ warning("Date column not found; Season will be unavailable.")
+ df <- df %>% mutate(Season = factor(NA_character_, levels = c("Spring", "Summer", "Fall")))
 }
 
 # --- SPECIES LOOKUP + LABEL CREATION ---------------------------------
@@ -194,16 +210,19 @@ if (length(species_vec) == 0) {
   loop_fl_mean   <- mean(loop_df$Length_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_df$Length_mm, na.rm = TRUE)
   
-  loop_p  <- ggplot(loop_df, aes(x = Length_mm)) +
+  loop_p <- ggplot(loop_df, aes(x = Length_mm, fill = Season)) +
    geom_histogram(binwidth = loop_bw, boundary = 0,
-                  color = "grey30", fill = "#74a9cf", alpha = 0.85) +
-   geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
-   geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
+                  colour = "grey25", position = "stack") +
+   geom_vline(xintercept = loop_fl_mean,   colour = "#de2d26", linewidth = 0.7) +
+   geom_vline(xintercept = loop_fl_median, colour = "#238b45", linetype = "dashed", linewidth = 0.7) +
+   scale_fill_manual(values = c(Spring = "#66c2a5", Summer = "#fc8d62", Fall = "#8da0cb"),
+                     na.value = "grey70", drop = TRUE) +
    labs(
-    title   = paste0(loop_label, " — Length histogram (2012+)"),
+    title    = paste0(loop_label, " — Length histogram (2012+)"),
+    subtitle = "Bar segments show counts by Season",
+    x = "Length (mm)", y = "Count", fill = "Season",
     caption = paste0(
-     loop_label, " (n = ", nrow(loop_df), "): ",
-     "Histogram of lengths. ",
+     loop_label, " (n = ", nrow(loop_df), "). ",
      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
      " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
     )
