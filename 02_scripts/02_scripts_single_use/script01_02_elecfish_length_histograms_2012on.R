@@ -35,7 +35,7 @@ suppressPackageStartupMessages({
 ##### CONFIG —  #########################################################
 #-----------------------------------------------------------------------#
 # Path to the ElecFish Excel export (already filtered to 2012+ upstream)
-path_elecfish_xlsx <- file.path("01_data", "01_raw_files", "lw_raw_elecfish_2012_on.xlsx")
+path_elecfish_xlsx <- file.path("01_data", "01_raw_files", "fixed_lw_raw_elecfish_2012_on.xlsx")
 
 # If data are not on the first sheet, set a name or index here (else keep NULL)
 excel_sheet_name <- NULL  # e.g., "Export" or 1
