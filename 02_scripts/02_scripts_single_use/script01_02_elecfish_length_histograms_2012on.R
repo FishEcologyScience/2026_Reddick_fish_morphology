@@ -17,7 +17,7 @@
 ##
 ## Notes:
 ##   - Single-use script (histograms only)
-##
+##   - Goldfish (F0181) were sampled from June 19, 2012 through October 28, 2025 across spring, summer, and fall with summer most sampled (672 records; 54.7%), followed by fall (540; 44.0%) and spring (16; 1.3%). The full dataset contains 1,228 total goldfish records.  Sampling spans 39 unique transects, among rows with valid Time Period codes, effort was predominantly night (code 2: 922; 89.2%) vs. day (code 1: 112; 10.8%), with no crepuscular codes present and 194 rows missing a time‑period code.
 ## --------------------------------------------------------------#
 
 ##### Setup #############################################################
