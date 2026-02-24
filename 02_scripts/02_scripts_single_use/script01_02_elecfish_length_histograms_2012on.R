@@ -29,6 +29,7 @@ suppressPackageStartupMessages({
  library(ggplot2)
  library(tidyr)
  library(readr)
+ library(lubridate)  # robust date parsing
 })
 
 ##### CONFIG —  #########################################################
@@ -41,8 +42,8 @@ excel_sheet_name <- NULL  # e.g., "Export" or 1
 
 # Column names in your Excel export (match EXACTLY to your headers)
 COL_SPECIES   <- "Species"        # species/common/scientific name (pick one)
-COL_LENGTH_MM <- "Length"         
-# Date is not required here since we’re not filtering by year, but keep if present
+COL_LENGTH_MM <- "Length"
+# If NULL, we will auto-detect the first column containing "date" (case-insensitive)
 COL_DATE      <- NULL             # e.g., "SampleDate" or NULL
 
 # Path to species lookup (two columns: Species, Common Name)
@@ -54,13 +55,17 @@ COL_COMMON_NAME     <- "Common Name"
 MIN_N_PER_SPECIES <- 5
 
 # Outputs
-out_dir_figs   <- file.path("03_outputs", "01_figures")  
-out_dir_tables <- file.path("03_outputs", "01_tables")   
+out_dir_figs   <- file.path("03_outputs", "01_figures")
+out_dir_tables <- file.path("03_outputs", "01_tables")
 
 # Histogram defaults
 DEFAULT_BINS   <- 30
 FD_FALLBACK_MM <- 5               # fallback binwidth (mm) if FD binwidth can’t be computed
 
+# Season palette (clean, no purple/orange/green combo)
+PAL_SEASON <- c(Spring = "#A1D99B",  # teal
+                Summer = "#FDD0A2",  # blue
+                Fall   = "#9ECAE1")  # brown
 
 ##### Create output directories ########################################
 #-----------------------------------------------------------------------#
@@ -85,21 +90,67 @@ if (length(missing_cols) > 0) {
 
 ##### Normalize (no year filter needed) ################################
 #-----------------------------------------------------------------------#
+# Auto-detect a date column if COL_DATE is NULL
+if (is.null(COL_DATE)) {
+ date_candidates <- names(df_raw)[grepl("date", names(df_raw), ignore.case = TRUE)]
+ if (length(date_candidates) >= 1) {
+  COL_DATE <- date_candidates[1]
+  message("Auto-detected date column: ", COL_DATE)
+ }
+}
+
+# Build df (carry Date before filtering so rows stay aligned)
 df <- df_raw %>%
  # Standardize working column names
  rename(
-  Species_raw = !!sym(COL_SPECIES),
-  Length_raw  = !!sym(COL_LENGTH_MM)
+  Species_raw = !!rlang::sym(COL_SPECIES),
+  Length_raw  = !!rlang::sym(COL_LENGTH_MM)
  ) %>%
  mutate(
   Species   = Species_raw %>% as.character() %>% stringr::str_squish(),
   Length_mm = suppressWarnings(as.numeric(Length_raw))
- ) %>%
- filter(!is.na(Length_mm), Length_mm > 0)
+ )
 
-# Optional: if a date column exists and you want it preserved (not used for filtering)
 if (!is.null(COL_DATE) && COL_DATE %in% names(df_raw)) {
- df <- df %>% mutate(Date = .data[[COL_DATE]])
+ df <- df %>% mutate(Date_raw = .data[[COL_DATE]])
+}
+
+# Now filter invalid lengths
+df <- df %>% filter(!is.na(Length_mm), Length_mm > 0)
+
+# --- MONTH + SEASON DERIVATION (from Date; fallback to Month) ---------
+if ("Date_raw" %in% names(df)) {
+ # Parse Date robustly (supports common formats)
+ df <- df %>%
+  mutate(
+   Date_parsed = suppressWarnings(lubridate::parse_date_time(
+    as.character(Date_raw),
+    orders = c("Ymd","Y-m-d","mdY","m/d/Y","dmy","d/m/Y","Y/m/d","m-d-Y","d-m-Y"),
+    quiet  = TRUE
+   )),
+   Date  = as.Date(coalesce(Date_parsed, suppressWarnings(as.Date(Date_raw)))),
+   Month = suppressWarnings(lubridate::month(Date))
+  ) %>% select(-Date_parsed)
+} else if ("Month" %in% names(df)) {
+ df <- df %>% mutate(Month = suppressWarnings(as.integer(.data[["Month"]])))
+} else {
+ message("No Date or Month column found — will use non-season colored fallback.")
+}
+
+# Map Month -> Season per requirement:
+#   Spring = May–June (5,6)
+#   Summer = July–August (7,8)
+#   Fall   = everything else (including NA)
+if ("Month" %in% names(df)) {
+ df <- df %>%
+  mutate(
+   Season = dplyr::case_when(
+    Month %in% c(5L, 6L) ~ "Spring",
+    Month %in% c(7L, 8L) ~ "Summer",
+    TRUE                 ~ "Fall"
+   ),
+   Season = factor(Season, levels = c("Spring","Summer","Fall"))
+  )
 }
 
 # --- SPECIES LOOKUP + LABEL CREATION ---------------------------------
@@ -157,9 +208,9 @@ df_counts <- df %>%
  ) %>%
  arrange(desc(n_all))
 
-out_counts <- file.path(out_dir_tables, "elecfish_counts_by_species_2012plus.csv")
-readr::write_csv(df_counts, out_counts)
-message("Wrote counts table: ", out_counts)
+# out_counts <- file.path(out_dir_tables, "elecfish_counts_by_species_2012plus.csv")
+# readr::write_csv(df_counts, out_counts)
+# message("Wrote counts table: ", out_counts)
 
 ##### Helper: Freedman–Diaconis binwidth with fallback #################
 #-----------------------------------------------------------------------#
@@ -183,32 +234,86 @@ if (length(species_vec) == 0) {
  ##### PLOTTING LOOP — per-species length histograms #################
  #-------------------------------------------------------------------#
  for (loop_species in species_vec) {
-  loop_df <- dplyr::filter(df, Species == loop_species)
+  loop_df    <- dplyr::filter(df, Species == loop_species)
   loop_label <- dplyr::first(loop_df$Species_label)
   if (nrow(loop_df) < MIN_N_PER_SPECIES) {
    message("Skipping ", loop_species, " (n = ", nrow(loop_df), " < ", MIN_N_PER_SPECIES, ").")
    next
   }
   
-  loop_bw       <- fd_binwidth(loop_df$Length_mm)
+  loop_bw        <- fd_binwidth(loop_df$Length_mm)
   loop_fl_mean   <- mean(loop_df$Length_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_df$Length_mm, na.rm = TRUE)
   
-  loop_p  <- ggplot(loop_df, aes(x = Length_mm)) +
-   geom_histogram(binwidth = loop_bw, boundary = 0,
-                  color = "grey30", fill = "#74a9cf", alpha = 0.85) +
-   geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
-   geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
-   labs(
-    title   = paste0(loop_label, " — Length histogram (2012+)"),
-    caption = paste0(
-     loop_label, " (n = ", nrow(loop_df), "): ",
-     "Histogram of lengths. ",
-     "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
-     " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
-    )
-   ) +
-   theme_minimal(base_size = 12)
+  # Build plot — single panel, clearly color-coded by Season (stacked)
+  has_season <- "Season" %in% names(loop_df) && any(!is.na(loop_df$Season))
+  
+  if (has_season) {
+   season_counts <- loop_df %>%
+    dplyr::filter(!is.na(Season)) %>%
+    dplyr::count(Season, name = "n")
+   sc_txt <- if (nrow(season_counts) > 0) {
+    paste(paste0(season_counts$Season, "=", season_counts$n), collapse = ", ")
+   } else {
+    "no seasonal breakdown"
+   }
+   
+   loop_p <- ggplot(loop_df, aes(x = Length_mm, fill = Season)) +
+    geom_histogram(
+     binwidth  = loop_bw,
+     boundary  = 0,
+     position  = "stack",   # stacked for clear season contributions
+     alpha     = 0.95,
+     color     = "grey20"
+    ) +
+    geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
+    geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
+    scale_fill_manual(
+     values = c(
+      Spring = "#66C2A5",   # pastel green
+      Summer = "#FC8D62",   # pastel orange
+      Fall   = "#8DA0CB"    # pastel light blue
+     ),
+     drop = FALSE
+    ) +
+    labs(
+     title   = paste0(loop_label, " — Length histogram by season (2012+)"),
+     caption = paste0(
+      loop_label, " (n = ", nrow(loop_df), "; ", sc_txt, "). ",
+      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+      " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
+     ),
+     x = "Fork length (mm)",
+     y = "Count",
+     fill = "Season"
+    ) +
+    theme_minimal(base_size = 12)
+   
+  } else {
+   # Fallback: original single-panel histogram (no season available)
+   loop_p <- ggplot(loop_df, aes(x = Length_mm)) +
+    geom_histogram(
+     binwidth = loop_bw,
+     boundary = 0,
+     color = "grey30",
+     fill  = "#74a9cf",
+     alpha = 0.85
+    ) +
+    geom_vline(xintercept = loop_fl_mean,   color = "#de2d26", linewidth = 0.7) +
+    geom_vline(xintercept = loop_fl_median, color = "#238b45", linetype = "dashed", linewidth = 0.7) +
+    labs(
+     title   = paste0(loop_label, " — Length histogram (2012+)"),
+     caption = paste0(
+      loop_label, " (n = ", nrow(loop_df), "): ",
+      "Histogram of lengths. ",
+      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+      " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
+     ),
+     x = "Fork length (mm)",
+     y = "Count"
+    ) +
+    theme_minimal(base_size = 12)
+  }
   
   # Show the per-species plot in the RStudio Plots pane
   print(loop_p)
@@ -216,16 +321,13 @@ if (length(species_vec) == 0) {
   # Optional: briefly pause so plots “tick by” when sourcing
   # Sys.sleep(0.15)
   
-  
   # Safe filename for species (saving commented out)
   # Filename based on both ID and common name (avoids collisions)
-  loop_common <- dplyr::coalesce(lab_common[loop_species], loop_species) %>% as.character()
+  loop_common  <- dplyr::coalesce(lab_common[loop_species], loop_species) %>% as.character()
   loop_sp_file <- make_safe_filename(paste(loop_species, loop_common, sep = "_"))
   loop_out_png <- file.path(out_dir_figs, paste0("hist_length_", loop_sp_file, "_2012plus.png"))
   # ggsave(loop_out_png, loop_p, width = 7, height = 5, dpi = 300)
- 
  }
 }
-
 
 message("\nDone. Inspect figures in: ", normalizePath(out_dir_figs, mustWork = FALSE))

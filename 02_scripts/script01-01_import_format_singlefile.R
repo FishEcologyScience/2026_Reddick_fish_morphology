@@ -26,7 +26,7 @@ path_data_root <- "01_data"
 path_singlefile <- file.path(
  path_data_root,
  "01_raw_files",
- "Fish widths_DraftExcelAnalysis_Jan2026.xlsx"
+ "Fixed_fish_widths_DraftExcelAnalysis_Feb2026.xlsx"
 )
 
 # Output objects
