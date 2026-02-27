@@ -111,6 +111,19 @@ df <- df_raw %>%
   Length_mm = suppressWarnings(as.numeric(Length_raw))
  )
 
+# ---- Sanitize Species (prevents NA/blank species from being dropped downstream) ----
+df <- df %>%
+ mutate(
+  Species = dplyr::case_when(
+   is.na(Species) ~ "UNKNOWN",
+   !nzchar(Species) ~ "UNKNOWN",
+   TRUE ~ Species
+  )
+ )
+
+# Safety checks — should be true after sanitization
+stopifnot(!any(is.na(df$Species) | !nzchar(df$Species)))
+
 if (!is.null(COL_DATE) && COL_DATE %in% names(df_raw)) {
  df <- df %>% mutate(Date_raw = .data[[COL_DATE]])
 }
@@ -225,7 +238,7 @@ fd_binwidth <- function(x, fallback = FD_FALLBACK_MM) {
 
 ##### Per-species histograms ###########################################
 #-----------------------------------------------------------------------#
-species_vec <- sort(unique(df$Species[!is.na(df$Species) & nzchar(df$Species)]))
+species_vec <- sort(unique(df$Species))
 
 if (length(species_vec) == 0) {
  warning("No species found with valid positive lengths.")

@@ -65,23 +65,25 @@ df_all <- df_raw %>%
   Mass_g        = suppressWarnings(as.numeric(Mass_g))
  )
 
+## ---- Sanitize Species BEFORE splitting (prevents data loss in split) ----
+df_all <- df_all %>%
+ dplyr::mutate(
+  Species = dplyr::case_when(
+   is.na(Species) ~ "UNKNOWN",
+   !nzchar(trimws(Species)) ~ "UNKNOWN",
+   TRUE ~ trimws(Species)
+  )
+ )
 
 ##### Split by species #######################################----
 #-------------------------------------------------------------#
-
 combined_all <- split(df_all, df_all$Species)
 
-# Sanitize species names if needed
-sp_names <- names(combined_all)
-bad_idx  <- which(is.na(sp_names) | !nzchar(sp_names))
-if (length(bad_idx)) {
- sp_names[bad_idx] <- paste0("UNKNOWN_", bad_idx)
- names(combined_all) <- sp_names
-}
+## Optional safety check (should be a no-op now)
+stopifnot(!any(is.na(names(combined_all)) | !nzchar(names(combined_all))))
 
 cat("Species detected:", paste(names(combined_all), collapse = ", "), "\n")
 cat("Total rows:", nrow(df_all), "\n")
 cat("\nSingle-table import complete.\n")
-
 
 

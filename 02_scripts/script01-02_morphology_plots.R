@@ -25,10 +25,10 @@
 # - df_all       : single combined data frame of all species
 
 if (!exists("combined_all")) {
- stop("ERROR: `combined_all` not found. Run script01-02_import_format.R first.")
+ stop("ERROR: `combined_all` not found. Run the import/format script first (e.g., script01-01_import_format_singlefile.R).")
 }
 if (!exists("df_all")) {
- stop("ERROR: `df_all` not found. Run script01-02_import_format.R first.")
+ stop("ERROR: `df_all` not found. Run the import/format script first (e.g., script01-01_import_format_singlefile.R).")
 }
 
 # Output directories (created if missing; exports remain commented out below)
@@ -43,17 +43,6 @@ df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) m
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
 
-
-# Sanitize species names in case of empty keys (defensive against zero-length names)
-sp_names <- names(combined_all)
-bad_idx  <- which(is.na(sp_names) | !nzchar(sp_names))
-if (length(bad_idx)) {
- warning("Empty species names detected at positions: ",
-         paste(bad_idx, collapse = ", "),
-         ". Renaming to 'UNKNOWN_<idx>'.")
- sp_names[bad_idx] <- paste0("UNKNOWN_", bad_idx)
- names(combined_all) <- sp_names
-}
 
 # Helper to standardize plot captions per species
 make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", text)
