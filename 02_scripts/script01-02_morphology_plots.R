@@ -59,6 +59,9 @@ MIN_N_PER_SPECIES <- 10
 #   - "none"         : no regression lines on combined plots
 COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 
+# ---- Histogram binning parameter (global) -------------------#
+# single fixed width across all lengths.
+BIN_WIDTH_MM <- 50   # 5 cm
 
 ### Core Data Processing
 #----------------------------#
@@ -396,25 +399,27 @@ for (param_species in names(combined_all)) {
  
  
  #### Plot 6: Histogram of Fork Lengths per species -----------#
- ### Minor: Adaptive binwidth (Freedman–Diaconis), mean & median markers ###
+ ### Fixed binwidth (single width across all lengths) ###
  
- # Uses an adaptive binwidth (FD); falls back if IQR is 0/NA.
+ # Data for histogram
  loop_hist_df <- df_clean %>%
   dplyr::filter(!is.na(ForkLength_mm))
  
  # Only build if we have *some* data points (>= 1).
  if (nrow(loop_hist_df) >= 1) {
-  # Compute FD binwidth robustly (protect against zero IQR and tiny n)
-  loop_iqr     <- stats::IQR(loop_hist_df$ForkLength_mm, na.rm = TRUE)
-  loop_n       <- nrow(loop_hist_df)
-  loop_bw_fd   <- if (loop_n > 1) 2 * loop_iqr / (loop_n)^(1/3) else NA_real_
-  loop_bw_safe <- if (is.finite(loop_bw_fd) && loop_bw_fd > 0) loop_bw_fd else 5
   
+  # Mean & median markers
   loop_fl_mean   <- mean(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
-   geom_histogram(binwidth = loop_bw_safe, boundary = 0, color = "grey30", fill = "#74a9cf", alpha = 0.8) +
+   geom_histogram(
+    binwidth = BIN_WIDTH_MM,        # <--- fixed width (5 cm = 50 mm)
+    boundary = 0,
+    color = "grey30",
+    fill = "#74a9cf",
+    alpha = 0.8
+   ) +
    annotate("segment",
             x = loop_fl_mean, xend = loop_fl_mean,
             y = -Inf, yend = Inf,
@@ -423,7 +428,6 @@ for (param_species in names(combined_all)) {
             x = loop_fl_median, xend = loop_fl_median,
             y = -Inf, yend = Inf,
             colour = "#238b45", linetype = "dashed", linewidth = 1.0, lineend = "butt") +
-  
    labs(
     title   = paste0(param_species, " - Histogram of Fork Length"),
     x       = "Fork Length (mm)",
@@ -431,8 +435,9 @@ for (param_species in names(combined_all)) {
     caption = make_caption(
      loop_hist_df,
      paste0(
-      "Histogram of fork lengths. Binwidth ≈ ", formatC(loop_bw_safe, digits = 2, format = "f"),
-      " mm. Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+      "Histogram of fork lengths. Fixed bin width = ",
+      formatC(BIN_WIDTH_MM, digits = 0, format = "f"), " mm (5 cm). ",
+      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
       " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
      ),
      param_species
@@ -450,10 +455,8 @@ for (param_species in names(combined_all)) {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_hist_df, "No fork length data available.", param_species))
  }
- 
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
-
 
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
@@ -534,7 +537,8 @@ if (COMBINED_TREND_MODE == "overall") {
 ### Combined: Histogram of Fork Lengths by Species ###
 df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
- geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85, bins = 30, boundary = 0) +
+ geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
+                binwidth = BIN_WIDTH_MM, boundary = 0) +
  labs(
   title = "Histogram of Fork Lengths by Species",
   x = "Fork Length (mm)",
