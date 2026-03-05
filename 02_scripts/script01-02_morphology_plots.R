@@ -65,7 +65,7 @@ COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 # The main per-species processing loop builds:
 #   (1) Summary table row (with min/max)
 #   (2) 5 plots per species (with guards for min N where applicable)
-#   (3) QC flags (negative slope, multiple linear regimes)
+#   (3) QC flags (negative slope)
 
 
 ##### Species Loop (plots + simple models only) ###############----
@@ -228,8 +228,64 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, temp_model_row)
  
+ #### Plot 3: Fork Length ~ Mass (linear) -------------------#
+ ### Scatter + optional linear fit with equation ###
  
- #### Plot 3: log(Width) ~ log(Fork Length) (log-log) --------#
+ # Use only rows with both FL and Mass present and Mass > 0
+ loop_fl_mass <- df_clean %>%
+  dplyr::filter(!is.na(ForkLength_mm), !is.na(Mass_g), Mass_g > 0)
+ 
+ if (nrow(loop_fl_mass) >= MIN_N_PER_SPECIES) {
+  loop_p_fl_mass <- ggplot(loop_fl_mass, aes(Mass_g, ForkLength_mm)) +
+   geom_point(color = "#d95f02", alpha = 0.6, size = 2) +
+   labs(
+    title   = paste0(param_species, " - Fork Length by Mass"),
+    x       = "Mass (g)",
+    y       = "Fork Length (mm)",
+    caption = make_caption(loop_fl_mass, "Fork length vs mass.", param_species)
+   ) +
+   theme_minimal()
+  
+  # Fit requires ≥2 points
+  if (nrow(loop_fl_mass) >= 2) {
+   loop_lm_fl_mass <- lm(ForkLength_mm ~ Mass_g, data = loop_fl_mass)
+   loop_coef_flm   <- coef(loop_lm_fl_mass)
+   slope_flm       <- unname(loop_coef_flm["Mass_g"])
+   int_flm         <- unname(loop_coef_flm["(Intercept)"])
+   r2_flm          <- summary(loop_lm_fl_mass)$r.squared
+   
+   eq_flm <- paste0(
+    "y = ", formatC(slope_flm, format = "f", digits = 2),
+    "x", ifelse(int_flm >= 0, " + ", " - "),
+    formatC(abs(int_flm), format = "f", digits = 2),
+    "\nR^2 = ", formatC(r2_flm, format = "f", digits = 4)
+   )
+   
+   loop_p_fl_mass <- loop_p_fl_mass +
+    geom_smooth(method = "lm", se = FALSE, color = "#bf5b17", linewidth = 1) +
+    annotate("text",
+             x = quantile(loop_fl_mass$Mass_g, 0.05, na.rm = TRUE),
+             y = quantile(loop_fl_mass$ForkLength_mm, 0.95, na.rm = TRUE),
+             label = eq_flm,
+             hjust = 0, vjust = 1, size = 3.5
+    )
+  }
+ } else {
+  loop_p_fl_mass <- ggplot() + theme_void() +
+   labs(
+    caption = make_caption(
+     loop_fl_mass,
+     paste0("Insufficient data (n = ", nrow(loop_fl_mass),
+            " < ", MIN_N_PER_SPECIES, ") for FL~Mass plot."),
+     param_species
+    )
+   )
+ }
+ 
+ # Store the plot
+ plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
+ 
+ #### Plot 4: log(Width) ~ log(Fork Length) (log-log) --------#
  ### Minor: Scatter on original scale + log-log fit, line drawn on original scale ###
  
  # Use positive values only for log transformation
@@ -284,7 +340,7 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["loglog_width_by_FL"]] <- loop_p_loglog_fl
  
  
- #### Plot 4: Power law (Width = a * Mass^b) -----------------#
+ #### Plot 5: Power law (Width = a * Mass^b) -----------------#
  ### Minor: Power-law fit via log-log regression (Width = a * Mass^b) ###
  
  # Use positive values only for log transformation
@@ -339,7 +395,7 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["powerlaw_width_by_mass"]] <- loop_p_power_mass
  
  
- #### Plot 5: Histogram of Fork Lengths per species -----------#
+ #### Plot 6: Histogram of Fork Lengths per species -----------#
  ### Minor: Adaptive binwidth (Freedman–Diaconis), mean & median markers ###
  
  # Uses an adaptive binwidth (FD); falls back if IQR is 0/NA.
