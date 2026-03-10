@@ -61,7 +61,7 @@ COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 
 # ---- Histogram binning parameter (global) -------------------#
 # single fixed width across all lengths.
-BIN_WIDTH_MM <- 50   # 5 cm
+BIN_WIDTH_CM <- 10   # 10 cm 
 
 ### Core Data Processing
 #----------------------------#
@@ -231,8 +231,7 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, temp_model_row)
  
- #### Plot 3: Fork Length ~ Mass (linear) -------------------#
- ### Scatter + optional linear fit with equation ###
+ #### Plot 3: Fork Length ~ Mass  ####
  
  # Use only rows with both FL and Mass present and Mass > 0
  loop_fl_mass <- df_clean %>%
@@ -245,32 +244,38 @@ for (param_species in names(combined_all)) {
     title   = paste0(param_species, " - Fork Length by Mass"),
     x       = "Mass (g)",
     y       = "Fork Length (mm)",
-    caption = make_caption(loop_fl_mass, "Fork length vs mass.", param_species)
+    caption = make_caption(loop_fl_mass, "Fork length vs mass (log-x model).", param_species)
    ) +
    theme_minimal()
   
-  # Fit requires ≥2 points
-  if (nrow(loop_fl_mass) >= 2) {
-   loop_lm_fl_mass <- lm(ForkLength_mm ~ Mass_g, data = loop_fl_mass)
-   loop_coef_flm   <- coef(loop_lm_fl_mass)
-   slope_flm       <- unname(loop_coef_flm["Mass_g"])
-   int_flm         <- unname(loop_coef_flm["(Intercept)"])
-   r2_flm          <- summary(loop_lm_fl_mass)$r.squared
+  # Fit requires ≥3 points
+  if (nrow(loop_fl_mass) >= 3) {
+   # Fit linear model on ln(Mass) to get a curved line on original axes
+   loop_lm_flm <- lm(ForkLength_mm ~ log(Mass_g), data = loop_fl_mass)
+   loop_coef   <- coef(loop_lm_flm)
+   slope_lnx   <- unname(loop_coef["log(Mass_g)"])  # slope on ln(Mass)
+   int_lnx     <- unname(loop_coef["(Intercept)"])  # intercept
+   r2_lnx      <- summary(loop_lm_flm)$r.squared
    
-   eq_flm <- paste0(
-    "y = ", formatC(slope_flm, format = "f", digits = 2),
-    "x", ifelse(int_flm >= 0, " + ", " - "),
-    formatC(abs(int_flm), format = "f", digits = 2),
-    "\nR^2 = ", formatC(r2_flm, format = "f", digits = 4)
-   )
+   # Manual predictions across Mass range on the original scale
+   xrng <- range(loop_fl_mass$Mass_g, na.rm = TRUE)
+   xseq <- seq(xrng[1], xrng[2], length.out = 200)
+   pred_df <- tibble(Mass_g = xseq) %>%
+    dplyr::mutate(FL_pred = predict(loop_lm_flm, newdata = tibble(Mass_g = Mass_g)))
    
+   # Add smooth curve + equation annotation (uses ln(x))
    loop_p_fl_mass <- loop_p_fl_mass +
-    geom_smooth(method = "lm", se = FALSE, color = "#bf5b17", linewidth = 1) +
-    annotate("text",
-             x = quantile(loop_fl_mass$Mass_g, 0.05, na.rm = TRUE),
-             y = quantile(loop_fl_mass$ForkLength_mm, 0.95, na.rm = TRUE),
-             label = eq_flm,
-             hjust = 0, vjust = 1, size = 3.5
+    geom_line(data = pred_df, aes(Mass_g, FL_pred), color = "#bf5b17", linewidth = 1) +
+    annotate(
+     "text",
+     x = quantile(loop_fl_mass$Mass_g, 0.05, na.rm = TRUE),
+     y = quantile(loop_fl_mass$ForkLength_mm, 0.95, na.rm = TRUE),
+     hjust = 0, vjust = 1, size = 3.5,
+     label = paste0(
+      "y = ", formatC(slope_lnx, format = "f", digits = 2), " ln(x)",
+      ifelse(int_lnx >= 0, " + ", " - "), formatC(abs(int_lnx), format = "f", digits = 2),
+      "\nR^2 = ", formatC(r2_lnx, format = "f", digits = 4)
+     )
     )
   }
  } else {
@@ -279,7 +284,7 @@ for (param_species in names(combined_all)) {
     caption = make_caption(
      loop_fl_mass,
      paste0("Insufficient data (n = ", nrow(loop_fl_mass),
-            " < ", MIN_N_PER_SPECIES, ") for FL~Mass plot."),
+            " < ", MIN_N_PER_SPECIES, ") for FL~Mass (log-x) plot."),
      param_species
     )
    )
@@ -287,7 +292,7 @@ for (param_species in names(combined_all)) {
  
  # Store the plot
  plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
- 
+
  #### Plot 4: log(Width) ~ log(Fork Length) (log-log) --------#
  ### Minor: Scatter on original scale + log-log fit, line drawn on original scale ###
  
@@ -414,7 +419,7 @@ for (param_species in names(combined_all)) {
   
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
    geom_histogram(
-    binwidth = BIN_WIDTH_MM,        # <--- fixed width (5 cm = 50 mm)
+    binwidth = BIN_WIDTH_CM,        # <--- fixed width (10 cm)
     boundary = 0,
     color = "grey30",
     fill = "#74a9cf",
@@ -436,7 +441,7 @@ for (param_species in names(combined_all)) {
      loop_hist_df,
      paste0(
       "Histogram of fork lengths. Fixed bin width = ",
-      formatC(BIN_WIDTH_MM, digits = 0, format = "f"), " mm (5 cm). ",
+      formatC(BIN_WIDTH_CM, digits = 0, format = "f"), " cm. ",
       "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
       " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
      ),
@@ -538,7 +543,7 @@ if (COMBINED_TREND_MODE == "overall") {
 df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
  geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
-                binwidth = BIN_WIDTH_MM, boundary = 0) +
+                binwidth = BIN_WIDTH_CM, boundary = 0) +
  labs(
   title = "Histogram of Fork Lengths by Species",
   x = "Fork Length (mm)",
