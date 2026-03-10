@@ -25,10 +25,10 @@
 # - df_all       : single combined data frame of all species
 
 if (!exists("combined_all")) {
- stop("ERROR: `combined_all` not found. Run script01-02_import_format.R first.")
+ stop("ERROR: `combined_all` not found. Run the import/format script first (e.g., script01-01_import_format_singlefile.R).")
 }
 if (!exists("df_all")) {
- stop("ERROR: `df_all` not found. Run script01-02_import_format.R first.")
+ stop("ERROR: `df_all` not found. Run the import/format script first (e.g., script01-01_import_format_singlefile.R).")
 }
 
 # Output directories (created if missing; exports remain commented out below)
@@ -43,17 +43,6 @@ df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) m
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
 
-
-# Sanitize species names in case of empty keys (defensive against zero-length names)
-sp_names <- names(combined_all)
-bad_idx  <- which(is.na(sp_names) | !nzchar(sp_names))
-if (length(bad_idx)) {
- warning("Empty species names detected at positions: ",
-         paste(bad_idx, collapse = ", "),
-         ". Renaming to 'UNKNOWN_<idx>'.")
- sp_names[bad_idx] <- paste0("UNKNOWN_", bad_idx)
- names(combined_all) <- sp_names
-}
 
 # Helper to standardize plot captions per species
 make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", text)
@@ -70,13 +59,16 @@ MIN_N_PER_SPECIES <- 10
 #   - "none"         : no regression lines on combined plots
 COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 
+# ---- Histogram binning parameter (global) -------------------#
+# single fixed width across all lengths.
+BIN_WIDTH_CM <- 10   # 10 cm 
 
 ### Core Data Processing
 #----------------------------#
 # The main per-species processing loop builds:
 #   (1) Summary table row (with min/max)
 #   (2) 5 plots per species (with guards for min N where applicable)
-#   (3) QC flags (negative slope, multiple linear regimes)
+#   (3) QC flags (negative slope)
 
 
 ##### Species Loop (plots + simple models only) ###############----
@@ -239,8 +231,69 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, temp_model_row)
  
+ #### Plot 3: Fork Length ~ Mass  ####
  
- #### Plot 3: log(Width) ~ log(Fork Length) (log-log) --------#
+ # Use only rows with both FL and Mass present and Mass > 0
+ loop_fl_mass <- df_clean %>%
+  dplyr::filter(!is.na(ForkLength_mm), !is.na(Mass_g), Mass_g > 0)
+ 
+ if (nrow(loop_fl_mass) >= MIN_N_PER_SPECIES) {
+  loop_p_fl_mass <- ggplot(loop_fl_mass, aes(Mass_g, ForkLength_mm)) +
+   geom_point(color = "#d95f02", alpha = 0.6, size = 2) +
+   labs(
+    title   = paste0(param_species, " - Fork Length by Mass"),
+    x       = "Mass (g)",
+    y       = "Fork Length (mm)",
+    caption = make_caption(loop_fl_mass, "Fork length vs mass (log-x model).", param_species)
+   ) +
+   theme_minimal()
+  
+  # Fit requires ≥3 points
+  if (nrow(loop_fl_mass) >= 3) {
+   # Fit linear model on ln(Mass) to get a curved line on original axes
+   loop_lm_flm <- lm(ForkLength_mm ~ log(Mass_g), data = loop_fl_mass)
+   loop_coef   <- coef(loop_lm_flm)
+   slope_lnx   <- unname(loop_coef["log(Mass_g)"])  # slope on ln(Mass)
+   int_lnx     <- unname(loop_coef["(Intercept)"])  # intercept
+   r2_lnx      <- summary(loop_lm_flm)$r.squared
+   
+   # Manual predictions across Mass range on the original scale
+   xrng <- range(loop_fl_mass$Mass_g, na.rm = TRUE)
+   xseq <- seq(xrng[1], xrng[2], length.out = 200)
+   pred_df <- tibble(Mass_g = xseq) %>%
+    dplyr::mutate(FL_pred = predict(loop_lm_flm, newdata = tibble(Mass_g = Mass_g)))
+   
+   # Add smooth curve + equation annotation (uses ln(x))
+   loop_p_fl_mass <- loop_p_fl_mass +
+    geom_line(data = pred_df, aes(Mass_g, FL_pred), color = "#bf5b17", linewidth = 1) +
+    annotate(
+     "text",
+     x = quantile(loop_fl_mass$Mass_g, 0.05, na.rm = TRUE),
+     y = quantile(loop_fl_mass$ForkLength_mm, 0.95, na.rm = TRUE),
+     hjust = 0, vjust = 1, size = 3.5,
+     label = paste0(
+      "y = ", formatC(slope_lnx, format = "f", digits = 2), " ln(x)",
+      ifelse(int_lnx >= 0, " + ", " - "), formatC(abs(int_lnx), format = "f", digits = 2),
+      "\nR^2 = ", formatC(r2_lnx, format = "f", digits = 4)
+     )
+    )
+  }
+ } else {
+  loop_p_fl_mass <- ggplot() + theme_void() +
+   labs(
+    caption = make_caption(
+     loop_fl_mass,
+     paste0("Insufficient data (n = ", nrow(loop_fl_mass),
+            " < ", MIN_N_PER_SPECIES, ") for FL~Mass (log-x) plot."),
+     param_species
+    )
+   )
+ }
+ 
+ # Store the plot
+ plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
+
+ #### Plot 4: log(Width) ~ log(Fork Length) (log-log) --------#
  ### Minor: Scatter on original scale + log-log fit, line drawn on original scale ###
  
  # Use positive values only for log transformation
@@ -295,7 +348,7 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["loglog_width_by_FL"]] <- loop_p_loglog_fl
  
  
- #### Plot 4: Power law (Width = a * Mass^b) -----------------#
+ #### Plot 5: Power law (Width = a * Mass^b) -----------------#
  ### Minor: Power-law fit via log-log regression (Width = a * Mass^b) ###
  
  # Use positive values only for log transformation
@@ -350,26 +403,28 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["powerlaw_width_by_mass"]] <- loop_p_power_mass
  
  
- #### Plot 5: Histogram of Fork Lengths per species -----------#
- ### Minor: Adaptive binwidth (Freedman–Diaconis), mean & median markers ###
+ #### Plot 6: Histogram of Fork Lengths per species -----------#
+ ### Fixed binwidth (single width across all lengths) ###
  
- # Uses an adaptive binwidth (FD); falls back if IQR is 0/NA.
+ # Data for histogram
  loop_hist_df <- df_clean %>%
   dplyr::filter(!is.na(ForkLength_mm))
  
  # Only build if we have *some* data points (>= 1).
  if (nrow(loop_hist_df) >= 1) {
-  # Compute FD binwidth robustly (protect against zero IQR and tiny n)
-  loop_iqr     <- stats::IQR(loop_hist_df$ForkLength_mm, na.rm = TRUE)
-  loop_n       <- nrow(loop_hist_df)
-  loop_bw_fd   <- if (loop_n > 1) 2 * loop_iqr / (loop_n)^(1/3) else NA_real_
-  loop_bw_safe <- if (is.finite(loop_bw_fd) && loop_bw_fd > 0) loop_bw_fd else 5
   
+  # Mean & median markers
   loop_fl_mean   <- mean(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
-   geom_histogram(binwidth = loop_bw_safe, boundary = 0, color = "grey30", fill = "#74a9cf", alpha = 0.8) +
+   geom_histogram(
+    binwidth = BIN_WIDTH_CM,        # <--- fixed width (10 cm)
+    boundary = 0,
+    color = "grey30",
+    fill = "#74a9cf",
+    alpha = 0.8
+   ) +
    annotate("segment",
             x = loop_fl_mean, xend = loop_fl_mean,
             y = -Inf, yend = Inf,
@@ -378,7 +433,6 @@ for (param_species in names(combined_all)) {
             x = loop_fl_median, xend = loop_fl_median,
             y = -Inf, yend = Inf,
             colour = "#238b45", linetype = "dashed", linewidth = 1.0, lineend = "butt") +
-  
    labs(
     title   = paste0(param_species, " - Histogram of Fork Length"),
     x       = "Fork Length (mm)",
@@ -386,8 +440,9 @@ for (param_species in names(combined_all)) {
     caption = make_caption(
      loop_hist_df,
      paste0(
-      "Histogram of fork lengths. Binwidth ≈ ", formatC(loop_bw_safe, digits = 2, format = "f"),
-      " mm. Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
+      "Histogram of fork lengths. Fixed bin width = ",
+      formatC(BIN_WIDTH_CM, digits = 0, format = "f"), " cm. ",
+      "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
       " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
      ),
      param_species
@@ -405,10 +460,8 @@ for (param_species in names(combined_all)) {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_hist_df, "No fork length data available.", param_species))
  }
- 
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
-
 
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
@@ -489,7 +542,8 @@ if (COMBINED_TREND_MODE == "overall") {
 ### Combined: Histogram of Fork Lengths by Species ###
 df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
- geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85, bins = 30, boundary = 0) +
+ geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
+                binwidth = BIN_WIDTH_CM, boundary = 0) +
  labs(
   title = "Histogram of Fork Lengths by Species",
   x = "Fork Length (mm)",
@@ -525,11 +579,15 @@ df_species_counts <- df_all %>%
 # ggsave(file.path(path_figs_dir, "combined_loglog_width_by_FL.png"), plots[["combined"]][["loglog_width_by_FL"]], width = 7, height = 5, dpi = 300)
 # ggsave(file.path(path_figs_dir, "combined_powerlaw_width_by_mass.png"), plots[["combined"]][["powerlaw_width_by_mass"]], width = 7, height = 5, dpi = 300)
 # ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
-#        plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
+     #  plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
 # readr::write_csv(df_species_counts,  file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present
 
+# Per-species plot export (compact)
+# for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
+#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
+#         plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
 ##### Cleanup (remove temporary loop/temp objects) #############----
 #-------------------------------------------------------------#
