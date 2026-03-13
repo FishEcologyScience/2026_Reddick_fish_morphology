@@ -69,6 +69,19 @@ df_width_gap <- df_width %>%
  ) %>%
  arrange(Species)
 
+# ---- standard deviation  ----
+df_width_sd <- df_width %>%
+ dplyr::group_by(Species) %>%
+ dplyr::summarise(
+  sd_width_mm = sd(Width_mm),
+  .groups = "drop"
+ )
+
+# Append SD to the existing gap table
+df_width_gap <- df_width_gap %>%
+ dplyr::left_join(df_width_sd, by = "Species")
+# ---- End SD chunk ----
+
 print(df_width_gap)
 cat("\nGap table () complete.\n")
 
