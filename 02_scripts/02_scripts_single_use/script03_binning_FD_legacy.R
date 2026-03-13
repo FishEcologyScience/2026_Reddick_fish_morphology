@@ -61,3 +61,4 @@ for (sp in unique(df_all$Species)) {
  cat("FD binwidth =", format(bw, digits = 3), "mm\n")
  print(table(bins))
 }
+
