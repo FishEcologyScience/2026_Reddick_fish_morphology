@@ -579,15 +579,15 @@ df_species_counts <- df_all %>%
 # ggsave(file.path(path_figs_dir, "combined_loglog_width_by_FL.png"), plots[["combined"]][["loglog_width_by_FL"]], width = 7, height = 5, dpi = 300)
 # ggsave(file.path(path_figs_dir, "combined_powerlaw_width_by_mass.png"), plots[["combined"]][["powerlaw_width_by_mass"]], width = 7, height = 5, dpi = 300)
 # ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
-     #  plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
+    # plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
 # readr::write_csv(df_species_counts,  file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present
 
 # Per-species plot export (compact)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
-#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
-#         plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
+# ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
+# plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
 ##### Cleanup (remove temporary loop/temp objects) #############----
 #-------------------------------------------------------------#
