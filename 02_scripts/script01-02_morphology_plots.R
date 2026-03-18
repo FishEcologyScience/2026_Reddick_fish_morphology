@@ -63,6 +63,9 @@ COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 # single fixed width across all lengths.
 BIN_WIDTH_CM <- 10   # 10 cm 
 
+# ---- Bar-spacing threshold (single reference line) ----------#
+BAR_THRESHOLD_MM <- 50  # 5 cm = 50 mm
+
 ### Core Data Processing
 #----------------------------#
 # The main per-species processing loop builds:
@@ -150,6 +153,15 @@ for (param_species in names(combined_all)) {
              y = quantile(loop_scatter_fl$Width_mm,      0.95, na.rm = TRUE),
              label = loop_eq_fl, hjust = 0, vjust = 1, size = 3.5)
   }
+  
+  # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm ----
+  if (is.finite(max(loop_scatter_fl$Width_mm, na.rm = TRUE)) &&
+      max(loop_scatter_fl$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
+   loop_p_scatter_fl <- loop_p_scatter_fl +
+    geom_hline(yintercept = BAR_THRESHOLD_MM,
+               linetype = "dashed", color = "firebrick",
+               linewidth = 0.5, alpha = 0.8)
+  }
  } else {
   # Placeholder when insufficient data for a meaningful plot
   loop_p_scatter_fl <- ggplot() + theme_void() +
@@ -232,6 +244,16 @@ for (param_species in names(combined_all)) {
      hjust = 0, vjust = 1, size = 3.5
     )
   }
+  
+  # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (Width on x) ----
+  if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
+      max(loop_scatter_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
+   loop_p_scatter_mass <- loop_p_scatter_mass +
+    geom_vline(xintercept = BAR_THRESHOLD_MM,
+               linetype = "dashed", color = "firebrick",
+               linewidth = 0.5, alpha = 0.8)
+  }
+  
  } else {
   loop_p_scatter_mass <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_scatter_mass,
@@ -415,6 +437,16 @@ for (param_species in names(combined_all)) {
                             "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 4)),
              hjust = 0, vjust = 1, size = 3.5)
   }
+  
+  # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (log scale OK) ----
+  if (is.finite(max(loop_power_mass$Width_mm, na.rm = TRUE)) &&
+      max(loop_power_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
+   loop_p_power_mass <- loop_p_power_mass +
+    geom_hline(yintercept = BAR_THRESHOLD_MM,
+               linetype = "dashed", color = "firebrick",
+               linewidth = 0.5, alpha = 0.8)
+  }
+  
  } else {
   loop_p_power_mass <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_power_mass,
