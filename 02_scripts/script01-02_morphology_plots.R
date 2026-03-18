@@ -63,6 +63,33 @@ COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 # single fixed width across all lengths.
 BIN_WIDTH_CM <- 10   # 10 cm 
 
+## ---- Global typography sizes for all plots ------------------#
+TITLE_SIZE        <- 16  # plot title
+SUBTITLE_SIZE     <- 13  # plot subtitle (if you use it)
+AXIS_TITLE_SIZE   <- 14  # x/y axis titles
+AXIS_TEXT_SIZE    <- 12  # x/y tick labels
+LEGEND_TITLE_SIZE <- 12
+LEGEND_TEXT_SIZE  <- 11
+CAPTION_SIZE      <- 10
+
+# Start from minimal but with a slightly larger base font
+theme_set(ggplot2::theme_minimal(base_size = 12))
+
+# Override key text elements globally
+ggplot2::theme_update(
+ plot.title    = ggplot2::element_text(size = TITLE_SIZE, face = "bold"),
+ plot.subtitle = ggplot2::element_text(size = SUBTITLE_SIZE),
+ plot.caption  = ggplot2::element_text(size = CAPTION_SIZE, colour = "grey30"),
+ 
+ axis.title.x  = ggplot2::element_text(size = AXIS_TITLE_SIZE),
+ axis.title.y  = ggplot2::element_text(size = AXIS_TITLE_SIZE),
+ axis.text.x   = ggplot2::element_text(size = AXIS_TEXT_SIZE),
+ axis.text.y   = ggplot2::element_text(size = AXIS_TEXT_SIZE),
+ 
+ legend.title  = ggplot2::element_text(size = LEGEND_TITLE_SIZE),
+ legend.text   = ggplot2::element_text(size = LEGEND_TEXT_SIZE)
+)
+
 # ---- Bar-spacing threshold (single reference line) ----------#
 BAR_THRESHOLD_MM <- 50  # 5 cm = 50 mm
 
@@ -128,8 +155,7 @@ for (param_species in names(combined_all)) {
     x       = "Fork Length (mm)",
     y       = "Width (mm)",
     caption = make_caption(loop_scatter_fl, "Width vs fork length.", param_species)
-   ) +
-   theme_minimal()
+   ) 
   
   # Fit requires at least 2 points
   if (nrow(loop_scatter_fl) >= 2) {
@@ -197,8 +223,7 @@ for (param_species in names(combined_all)) {
     x       = "Width (mm)",
     y       = "Mass (g)",
     caption = make_caption(loop_scatter_mass, "Mass vs width (model on ln(Mass)).", param_species)
-   ) +
-   theme_minimal()
+   ) 
   
   if (nrow(loop_scatter_mass) >= 3) {
    # Fit original model (predicting Width): Width = alpha * ln(Mass) + beta
@@ -282,8 +307,7 @@ for (param_species in names(combined_all)) {
     x       = "Fork Length (mm)",
     y       = "Mass (g)",
     caption = make_caption(loop_fl_mass, "Mass vs fork length (model on ln(Mass)).", param_species)
-   ) +
-   theme_minimal()
+   ) 
   
   # Fit requires ≥3 points
   if (nrow(loop_fl_mass) >= 3) {
@@ -354,8 +378,7 @@ for (param_species in names(combined_all)) {
     x       = "Fork Length (mm, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_loglog_fl, "log(Width) vs log(ForkLength).", param_species)
-   ) +
-   theme_minimal()
+   ) 
   
   if (nrow(loop_loglog_fl) >= 3) {
    loop_fit_ll   <- lm(log(Width_mm) ~ log(ForkLength_mm), data = loop_loglog_fl)
@@ -409,8 +432,7 @@ for (param_species in names(combined_all)) {
     x       = "Mass (g, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_power_mass, "Power-law width vs mass.", param_species)
-   ) +
-   theme_minimal()
+   ) 
   
   if (nrow(loop_power_mass) >= 3) {
    loop_fit_pw   <- lm(log(Width_mm) ~ log(Mass_g), data = loop_power_mass)
@@ -502,12 +524,11 @@ for (param_species in names(combined_all)) {
      param_species
     )
    ) +
-   scale_x_continuous(
-    breaks = scales::breaks_width(50),
-    minor_breaks = scales::breaks_width(25),
-    expand = c(0.01, 0)
-   ) +
-   theme_minimal()
+ scale_x_continuous(
+  breaks = scales::breaks_width(50),
+  minor_breaks = scales::breaks_width(25),
+  expand = c(0.01, 0)
+ )
   
   plots[[param_species]][["hist_FL"]] <- p_hist_fl
  } else {
