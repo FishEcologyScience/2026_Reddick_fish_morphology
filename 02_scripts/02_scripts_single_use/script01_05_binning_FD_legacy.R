@@ -1,5 +1,5 @@
 ## --------------------------------------------------------------#
-## Script name: script03_binning_FD_legacy.R
+## Script name: script01_05_binning_FD_legacy.R
 ##
 ## Purpose:
 ##   - Preserve the original adaptive (FD‑style) binning logic used

@@ -1,5 +1,5 @@
 ## --------------------------------------------------------------#
-## Script name: script01-03_gap_analysis_width.R
+## Script name: script01_03_gap_analysis_width.R
 ##
 ## Purpose:
 ##   - gap-analysis table.
@@ -13,21 +13,29 @@
 ##            - uses MIN_REQUIRED and LOW_N_THRESHOLD rules
 ##
 ## Author: Marcus Rizzuto
-## Date Created: 3/12/2026
-##
+## Date Created: 2026-03-12
 ## --------------------------------------------------------------#
+
+# Required upstream scripts (run automatically):
+# - 02_scripts/script00-01_load_packages.R
+# - 02_scripts/script01-01_import_format_singlefile.R
+source("02_scripts/script00-01_load_packages.R")
+source("02_scripts/script01-01_import_format_singlefile.R")
+
+# Guard: ensure upstream scripts created required objects
+if (!exists("df_all") && !exists("combined_all")) {
+ stop("Required objects not found: run the upstream scripts to create df_all or combined_all.")
+}
 
 ##### Setup --------------------------------------------------#
 WIDTH_THRESHOLD_MM  <- 50   # 5 cm
 MIN_REQUIRED        <- 5    # need ≥5 fish to say “represented”
 LOW_N_THRESHOLD     <- 10   # species with n<10 flagged as unreliable
 
-if (!exists("df_all") && !exists("combined_all")) {
- stop("Need df_all or combined_all first.")
-}
-
 library(dplyr)
 library(tibble)
+# library(purrr) # optional; you already use purrr::imap_dfr() with namespace
+
 
 ##### Build unified df ---------------------------------------#
 if (exists("combined_all")) {

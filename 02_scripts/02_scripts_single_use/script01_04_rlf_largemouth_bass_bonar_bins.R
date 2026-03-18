@@ -1,5 +1,5 @@
 ## --------------------------------------------------------------#
-## Script name: script02_rlf_largemouth_bass_bonar_bins.R
+## Script name: script01_04_rlf_largemouth_bass_bonar_bins.R
 ##
 ## Purpose:
 ##   - Read ElecFish export
