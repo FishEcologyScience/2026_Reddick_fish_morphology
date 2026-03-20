@@ -1,5 +1,5 @@
 ## --------------------------------------------------------------#
-## Script name: script02_rlf_largemouth_bass_bonar_bins.R
+## Script name: script01_04_rlf_largemouth_bass_bonar_bins.R
 ##
 ## Purpose:
 ##   - Read ElecFish export
@@ -147,9 +147,9 @@ tab_pop <- df_binned %>%
  )
 
 # Export table
-out_counts <- file.path(out_dir_tables, "rlf_lmb_counts_percent_bonar.csv")
-readr::write_csv(tab_pop, out_counts)
-message("Wrote counts table: ", out_counts)
+#out_counts <- file.path(out_dir_tables, "rlf_lmb_counts_percent_bonar.csv")
+#readr::write_csv(tab_pop, out_counts)
+#message("Wrote counts table: ", out_counts)
 
 ##### Optional: load ALF (for side-by-side comparison) #################
 #-----------------------------------------------------------------------#
@@ -200,9 +200,9 @@ if (alf_available) {
  out_png <- file.path(out_dir_figs, "rlf_lmb_population_only.png")
 }
 
-print(p)
-ggsave(out_png, p, width = 8, height = 5.5, dpi = 300)
-message("Wrote figure: ", out_png)
+#print(p)
+#ggsave(out_png, p, width = 8, height = 5.5, dpi = 300)
+#message("Wrote figure: ", out_png)
 
 ##### (Optional) Skewness g1 (quick diagnostic) ########################
 #-----------------------------------------------------------------------#
