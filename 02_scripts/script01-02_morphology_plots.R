@@ -59,8 +59,9 @@ if (!exists("df_all")) {
  stop("ERROR: `df_all` not found. Run the import/format script first (e.g., script01-01_import_format_singlefile.R).")
 }
 
-# Output directories (created if missing; exports remain commented out below)
-path_figs_dir   <- file.path("03_outputs", "01_figures")
+# Output directories — figures are saved into a dated subfolder (YYYY-mm-dd)
+# so each run's exports are isolated and won't overwrite previous versions.
+path_figs_dir   <- file.path("03_outputs", "01_figures", format(Sys.Date(), "%Y-%m-%d"))
 path_tables_dir <- file.path("03_outputs", "01_tables")
 if (!dir.exists(path_figs_dir))   dir.create(path_figs_dir,   recursive = TRUE, showWarnings = FALSE)
 if (!dir.exists(path_tables_dir)) dir.create(path_tables_dir, recursive = TRUE, showWarnings = FALSE)
@@ -211,10 +212,10 @@ for (param_species in names(combined_all)) {
    loop_int_fl   <- unname(loop_coef_fl[["(Intercept)"]])    # intercept
    
    loop_eq_fl <- paste0(
-    "y = ", formatC(loop_slope_fl, format = "f", digits = 2),
-    "x", ifelse(loop_int_fl >= 0, " + ", " - "),
-    formatC(abs(loop_int_fl), format = "f", digits = 2),
-    "\nR^2 = ", formatC(loop_r2_fl, format = "f", digits = 4)
+    "Width = ", formatC(loop_slope_fl, format = "f", digits = 2),
+    " · FL ", ifelse(loop_int_fl >= 0, "+ ", "- "),
+    formatC(abs(loop_int_fl), format = "f", digits = 2), " (intercept)",
+    "\nR^2 = ", formatC(loop_r2_fl, format = "f", digits = 3)
    )
    
    loop_p_scatter_fl <- loop_p_scatter_fl +
@@ -334,7 +335,7 @@ for (param_species in names(combined_all)) {
   b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
   
-  eq_label <- paste0("W = ", a_lbl, " · X^", b_lbl, r2_lbl, "\n(X = Width_mm)")
+  eq_label <- paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl)
   
   loop_p_scatter_mass <- loop_p_scatter_mass +
    annotate("text",
@@ -462,7 +463,7 @@ for (param_species in names(combined_all)) {
   b_lbl <- formatC(fit_info$b, format = "f", digits = 3)
   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
   
-  eq_label <- paste0("W = ", a_lbl, " · L^", b_lbl, r2_lbl)
+  eq_label <- paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl)
   
   loop_p_fl_mass <- loop_p_fl_mass +
    annotate(
@@ -527,10 +528,10 @@ for (param_species in names(combined_all)) {
     annotate("text",
              x = quantile(loop_loglog_fl$ForkLength_mm, 0.05, na.rm = TRUE),
              y = quantile(loop_loglog_fl$Width_mm,       0.95, na.rm = TRUE),
-             label = paste0("log(y) = ", formatC(loop_slope_ll, format = "f", digits = 2),
-                            " log(x) ", ifelse(loop_int_ll >= 0, "+ ", "- "),
+             label = paste0("log(Width) = slope·log(FL) ", ifelse(loop_int_ll >= 0, "+ ", "- "),
                             formatC(abs(loop_int_ll), format = "f", digits = 2),
-                            "\nR^2 = ", formatC(loop_r2_ll, format = "f", digits = 4)),
+                            "\nslope = ", formatC(loop_slope_ll, format = "f", digits = 3),
+                            "  R^2 = ", formatC(loop_r2_ll, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
   }
  } else {
@@ -586,9 +587,9 @@ for (param_species in names(combined_all)) {
     annotate("text",
              x = quantile(loop_power_mass$Mass_g, 0.05, na.rm = TRUE),
              y = quantile(loop_power_mass$Width_mm, 0.95, na.rm = TRUE),
-             label = paste0("y = ", formatC(loop_a_pw, format = "f", digits = 2),
-                            " x^", formatC(loop_b_pw, format = "f", digits = 2),
-                            "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 4)),
+             label = paste0("Width = ", formatC(loop_a_pw, format = "f", digits = 2),
+                            " · Mass^", formatC(loop_b_pw, format = "f", digits = 3),
+                            "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
   }
   
@@ -692,19 +693,35 @@ for (param_species in names(combined_all)) {
  sp_key <- tolower(trimws(param_species))
  if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) next
 
+ # Skip patchwork if any regression plot was replaced with a placeholder.
+ # Checks the same filters used in the species loop against MIN_N_PER_SPECIES.
+ loop_sp_df <- combined_all[[param_species]]
+ loop_n_checks <- c(
+  fl_width   = sum(!is.na(loop_sp_df$ForkLength_mm) & !is.na(loop_sp_df$Width_mm)),
+  mass_width = sum(!is.na(loop_sp_df$Mass_g)        & loop_sp_df$Mass_g > 0 & !is.na(loop_sp_df$Width_mm),     na.rm = TRUE),
+  fl_mass    = sum(!is.na(loop_sp_df$ForkLength_mm) & loop_sp_df$ForkLength_mm > 0 & !is.na(loop_sp_df$Mass_g) & loop_sp_df$Mass_g > 0, na.rm = TRUE)
+ )
+ if (any(loop_n_checks < MIN_N_PER_SPECIES)) {
+  cat("Skipping patchwork for", param_species, "— insufficient data in:",
+      paste(names(loop_n_checks)[loop_n_checks < MIN_N_PER_SPECIES], collapse = ", "), "\n")
+  next
+ }
+
  plots[[param_species]][["patchwork"]] <-
   (plots[[param_species]][["hist_FL"]]      | plots[[param_species]][["FL_by_mass"]])          /
   (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
   (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) +
   patchwork::plot_annotation(
-   title    = paste0(param_species, " \u2014 Morphology Overview"),
-   subtitle = "Histogram | Mass~Length    //    Width~Length | log(Width)~log(Length)    //    Mass~Width | Power Law",
+   title    = paste0(param_species),
    theme    = ggplot2::theme(
     plot.title    = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold"),
     plot.subtitle = ggplot2::element_text(size = SUBTITLE_SIZE - 1, colour = "grey40")
    )
   ) &
-  ggplot2::theme(plot.title = ggplot2::element_blank())  # strip per-plot titles; species in panel header
+  ggplot2::theme(
+   plot.title   = ggplot2::element_blank(),  # species name in panel header instead
+   plot.caption = ggplot2::element_blank()   # n and descriptions redundant at panel level
+  )
 
  cat("Patchwork panel built:", param_species, "\n")
 }
@@ -849,14 +866,14 @@ df_species_counts <- df_all %>%
 # ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
 # plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
-# Per-species patchwork panel export (16x20 inches recommended for legibility)
-for (sp in names(combined_all))
- ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
-        plots[[sp]][["patchwork"]], width = 16, height = 20, dpi = 300)
+# Per-species patchwork panel export — letter size (8.5x11), all species at once
+# for (sp in names(combined_all))
+#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
+#         plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
 
 # Single-species patchwork export (swap species name as needed)
-# ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 16, height = 20, dpi = 300)
-# ggsave(file.path(path_figs_dir, "Rudd_patchwork.png"),     plots[["Rudd"]][["patchwork"]],     width = 16, height = 20, dpi = 300)
+# ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
+# ggsave(file.path(path_figs_dir, "Rudd_patchwork.png"),     plots[["Rudd"]][["patchwork"]],     width = 8.5, height = 11, dpi = 300)
 
 ##### Cleanup (remove temporary loop/temp objects) #############----
 #-------------------------------------------------------------#
