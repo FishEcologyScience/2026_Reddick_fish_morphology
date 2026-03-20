@@ -625,11 +625,20 @@ for (param_species in names(combined_all)) {
   dplyr::filter(!is.na(ForkLength_mm))
  
  # Only build if we have *some* data points (>= 1).
+ loop_hist_caption <- NA_character_  # populated below; used in patchwork panel caption
  if (nrow(loop_hist_df) >= 1) {
-  
+
   # Mean & median markers
   loop_fl_mean   <- mean(loop_hist_df$ForkLength_mm, na.rm = TRUE)
   loop_fl_median <- stats::median(loop_hist_df$ForkLength_mm, na.rm = TRUE)
+
+  # Caption string for the patchwork panel footer
+  loop_mean_mass <- mean(df_clean$Mass_g, na.rm = TRUE)
+  loop_hist_caption <- paste0(
+   "n = ", nrow(loop_hist_df), "  |  ",
+   "Mean fork length: ", formatC(loop_fl_mean,   digits = 1, format = "f"), " mm  |  ",
+   "Mean mass: ",        formatC(loop_mean_mass, digits = 1, format = "f"), " g"
+  )
   
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
    geom_histogram(
@@ -692,13 +701,15 @@ for (param_species in names(combined_all)) {
     plot.caption = ggplot2::element_blank()                          # redundant at panel level
    )
 
-  # Step 2: add panel-level title and letter tags (a)-(f).
+  # Step 2: add panel-level title, letter tags (a)-(f), and histogram caption footer.
   plots[[param_species]][["patchwork"]] <- loop_pw +
    patchwork::plot_annotation(
     title      = param_species,
+    caption    = if (!is.na(loop_hist_caption)) loop_hist_caption else NULL,
     tag_levels = "a", tag_prefix = "(", tag_suffix = ")",
     theme      = ggplot2::theme(
-     plot.title = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold")
+     plot.title   = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold"),
+     plot.caption = ggplot2::element_text(size = CAPTION_SIZE, colour = "grey30")
     )
    )
 
@@ -814,8 +825,8 @@ plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkL
 # To view a single plot without printing all, use e.g.:
 #   plots[["Goldfish"]][["scatter_fl"]]
 #   plots[["combined"]][["hist_FL_by_species"]]
-print(plots)
-
+#   print(plots)
+for (sp in names(combined_all)) print(plots[[sp]][["patchwork"]])
 
 ##### Species-level counts (raw vs filtered) ##################----
 # Helps diagnose if species are genuinely low-sample vs heavily filtered by NA/zero.
