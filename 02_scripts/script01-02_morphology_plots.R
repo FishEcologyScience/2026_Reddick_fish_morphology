@@ -16,6 +16,34 @@
 ## Date Created: 1/27/2026
 ##
 ## --------------------------------------------------------------#
+##
+## PLOT INVENTORY (what this script produces)
+##
+##   Per-species plots — stored in plots[[species]][[slot]]:
+##   ┌─────┬──────────────────────────┬──────────────────────────────────────────┐
+##   │  #  │ Slot name                │ What it shows                            │
+##   ├─────┼──────────────────────────┼──────────────────────────────────────────┤
+##   │  1  │ scatter_fl               │ Width ~ Fork Length (linear fit)         │
+##   │  2  │ scatter_mass             │ Mass ~ Width (power-law, raw scale)      │
+##   │  3  │ FL_by_mass               │ Mass ~ Fork Length (power-law, raw scale)│
+##   │  4  │ loglog_width_by_FL       │ log(Width) ~ log(Fork Length)            │
+##   │  5  │ powerlaw_width_by_mass   │ Width ~ Mass^b (log-log axes)            │
+##   │  6  │ hist_FL                  │ Fork Length frequency histogram          │
+##   └─────┴──────────────────────────┴──────────────────────────────────────────┘
+##
+##   Multi-species combined plots — stored in plots[["combined"]][[slot]]:
+##     width_by_FL            All species: Width ~ Fork Length overlaid
+##     width_by_mass_logx     All species: Width ~ Mass (log x-axis)
+##     loglog_width_by_FL     All species: log(Width) ~ log(Fork Length)
+##     powerlaw_width_by_mass All species: Width ~ Mass^b (log-log)
+##     hist_FL_by_species     Fork Length histograms faceted by species
+##
+##   Summary tables created in the environment:
+##     df_combined_summary    Per-species descriptive stats (n, mean, min, max)
+##     df_combined_models     Power-law coefficients (a, b, R²) for Mass~Width
+##     df_species_counts      Raw vs. NA/zero-filtered sample sizes per species
+##
+## --------------------------------------------------------------#
 
 
 ##### Guards & Setup ##########################################----
@@ -50,20 +78,35 @@ make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", tex
 
 ##### QC Parameters #############################################----
 #-------------------------------------------------------------#
-# Minimum species-level sample size required to draw/fits
+
+# Minimum species-level sample size required to attempt regression fits.
+# Effect: species below this threshold get a blank placeholder plot with a
+#         note explaining the skip. Raise if you want stricter data requirements;
+#         lower (minimum 3) if you need fits on very small samples.
 MIN_N_PER_SPECIES <- 10
 
-# Controls how combined regression lines are drawn:
-#   - "overall"      : single global trend (original behavior for log-log/power)
-#   - "per_species"  : one trend line per species (usually clearer)
-#   - "none"         : no regression lines on combined plots
+# Controls how regression trend lines are drawn on COMBINED (multi-species) plots.
+# Options:
+#   "overall"     - single global trend across all species (default; shows overall signal)
+#   "per_species" - one trend line per species (clearer when species differ strongly)
+#   "none"        - scatter points only, no regression lines
+# Note: this setting does NOT affect per-species plots, only plots[["combined"]].
 COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 
 # ---- Histogram binning parameter (global) -------------------#
-# single fixed width across all lengths.
-BIN_WIDTH_CM <- 10   # 10 cm 
+# Fixed bin width applied uniformly across all species histograms.
+# Effect: smaller values show finer size-class detail but can look noisy on
+#         small samples; larger values smooth the distribution.
+BIN_WIDTH_CM <- 10   # 10 cm
+
+# ---- Bar-spacing threshold (single reference line) ----------#
+# A dashed reference line is drawn at this width value on Width plots,
+# but ONLY if the data for that species actually reach this threshold.
+# Change this if the biologically meaningful cutoff shifts (e.g., to 40 or 60 mm).
+BAR_THRESHOLD_MM <- 50  # 5 cm = 50 mm
 
 ## ---- Global typography sizes for all plots ------------------#
+# Adjust these to scale all text up or down uniformly across every plot.
 TITLE_SIZE        <- 16  # plot title
 SUBTITLE_SIZE     <- 13  # plot subtitle (if you use it)
 AXIS_TITLE_SIZE   <- 14  # x/y axis titles
@@ -80,18 +123,15 @@ ggplot2::theme_update(
  plot.title    = ggplot2::element_text(size = TITLE_SIZE, face = "bold"),
  plot.subtitle = ggplot2::element_text(size = SUBTITLE_SIZE),
  plot.caption  = ggplot2::element_text(size = CAPTION_SIZE, colour = "grey30"),
- 
+
  axis.title.x  = ggplot2::element_text(size = AXIS_TITLE_SIZE),
  axis.title.y  = ggplot2::element_text(size = AXIS_TITLE_SIZE),
  axis.text.x   = ggplot2::element_text(size = AXIS_TEXT_SIZE),
  axis.text.y   = ggplot2::element_text(size = AXIS_TEXT_SIZE),
- 
+
  legend.title  = ggplot2::element_text(size = LEGEND_TITLE_SIZE),
  legend.text   = ggplot2::element_text(size = LEGEND_TEXT_SIZE)
 )
-
-# ---- Bar-spacing threshold (single reference line) ----------#
-BAR_THRESHOLD_MM <- 50  # 5 cm = 50 mm
 
 ### Core Data Processing
 #----------------------------#
@@ -146,8 +186,8 @@ for (param_species in names(combined_all)) {
  df_combined_summary <- dplyr::bind_rows(df_combined_summary, df_summary)
  
  
- #### Plot 1: Width ~ Fork Length (linear) ------------------#
- ### Minor: Scatter + optional linear fit with equation ###
+ #### Plot 1: Width ~ Fork Length (linear fit) ####----
+ # Scatter with optional linear regression; equation and R² annotated on plot.
  
  # Use only rows with both Width and ForkLength present
  loop_scatter_fl <- df_clean %>% dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
@@ -202,8 +242,12 @@ for (param_species in names(combined_all)) {
  }
  plots[[param_species]][["scatter_fl"]] <- loop_p_scatter_fl
  
- #### Plot 2: Mass (W) by Width (X = Width_mm), using W = a · X^b ----
- ### Scatter with Mass on y, Width on x; fit power-law on the raw scale ###
+ #### Plot 2: Mass ~ Width (power-law, raw scale) ####----
+ # Scatter with Mass on y, Width on x; fits W = a·X^b directly on the raw scale
+ # using nls(), falling back to log-log with Duan's smearing correction if nls() fails.
+ # Use this plot to predict mass from width in original units.
+ # NOTE: Distinct from Plot 5 — Plot 2 uses Width as the predictor on raw axes;
+ #       Plot 5 uses Mass as the predictor on log-log axes to visualize scaling.
  
  # Keep only positive, non-missing values
  loop_scatter_mass <- df_clean %>%
@@ -330,8 +374,9 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
  
- #### Plot 3: Mass (W) by Fork Length (L) using W = a * L^b ########
- ### Scatter with Mass on y, Fork Length on x; fit power-law on raw scale ###
+ #### Plot 3: Mass ~ Fork Length (power-law, raw scale) ####----
+ # Scatter with Mass on y, Fork Length on x; fits W = a·L^b on the raw scale.
+ # Standard fisheries length-weight relationship plot.
  
  # Use only rows with positive W and L
  loop_fl_mass <- df_clean %>%
@@ -443,8 +488,9 @@ for (param_species in names(combined_all)) {
  # Store the plot (same slot name as before)
  plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
 
- #### Plot 4: log(Width) ~ log(Fork Length) (log-log) --------#
- ### Minor: Scatter on original scale + log-log fit, line drawn on original scale ###
+ #### Plot 4: log(Width) ~ log(Fork Length) (log-log axes) ####----
+ # Both axes on log10 scale; linearizes the power-law relationship.
+ # Good for checking whether Width and Fork Length scale allometrically.
  
  # Use positive values only for log transformation
  loop_loglog_fl <- df_clean %>%
@@ -497,8 +543,12 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["loglog_width_by_FL"]] <- loop_p_loglog_fl
  
  
- #### Plot 5: Power law (Width = a * Mass^b) -----------------#
- ### Minor: Power-law fit via log-log regression (Width = a * Mass^b) ###
+ #### Plot 5: Width ~ Mass^b (power-law, log-log axes) ####----
+ # Both axes on log10 scale; Mass is the predictor, Width is the response.
+ # Fit via log-log linear regression: log(Width) = b·log(Mass) + log(a).
+ # NOTE: Distinct from Plot 2 — here Mass drives Width (reverse direction),
+ #       and the fit is on log-log axes rather than the raw scale.
+ #       Use this plot to visualize the allometric scaling exponent b.
  
  # Use positive values only for log transformation
  loop_power_mass <- df_clean %>%
@@ -561,8 +611,9 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["powerlaw_width_by_mass"]] <- loop_p_power_mass
  
  
- #### Plot 6: Histogram of Fork Lengths per species -----------#
- ### Fixed binwidth (single width across all lengths) ###
+ #### Plot 6: Fork Length histogram ####----
+ # Fixed bin width (BIN_WIDTH_CM) across all species for direct comparison.
+ # Red solid line = mean; green dashed line = median.
  
  # Data for histogram
  loop_hist_df <- df_clean %>%
@@ -620,11 +671,54 @@ for (param_species in names(combined_all)) {
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
 
+
+##### Per-species patchwork panels ############################----
+#-------------------------------------------------------------#
+# Assemble one patchwork panel per species using the 6 individual plots.
+# Layout (3 rows x 2 columns):
+#
+#   Histogram of FL      |  Mass ~ Fork Length
+#   Width ~ Fork Length  |  log(Width) ~ log(Fork Length)
+#   Mass ~ Width         |  Width ~ Mass^b (power law)
+#
+# Individual plot titles are stripped (species name is redundant once the
+# panel header is present). Captions are kept — they carry n, equations,
+# and stats that remain meaningful at the sub-plot level.
+#
+# Stored in plots[[species]][["patchwork"]] for access or export.
+
+for (param_species in names(combined_all)) {
+
+ sp_key <- tolower(trimws(param_species))
+ if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) next
+
+ plots[[param_species]][["patchwork"]] <-
+  (plots[[param_species]][["hist_FL"]]      | plots[[param_species]][["FL_by_mass"]])          /
+  (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
+  (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) +
+  patchwork::plot_annotation(
+   title    = paste0(param_species, " \u2014 Morphology Overview"),
+   subtitle = "Histogram | Mass~Length    //    Width~Length | log(Width)~log(Length)    //    Mass~Width | Power Law",
+   theme    = ggplot2::theme(
+    plot.title    = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold"),
+    plot.subtitle = ggplot2::element_text(size = SUBTITLE_SIZE - 1, colour = "grey40")
+   )
+  ) &
+  ggplot2::theme(plot.title = ggplot2::element_blank())  # strip per-plot titles; species in panel header
+
+ cat("Patchwork panel built:", param_species, "\n")
+}
+
+
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
-# Build cross-species views using the combined dataset (df_all)
+# Build cross-species views using df_all (all species combined).
+# Trend line behaviour on these plots is controlled by COMBINED_TREND_MODE
+# (set in QC Parameters above): "overall", "per_species", or "none".
 
-### Combined: Width ~ Fork Length (linear) ###
+#### Combined 1: Width ~ Fork Length (linear) ####----
+# Shows whether species share similar width-to-length slopes or diverge,
+# suggesting morphological differences relevant to gear selectivity or condition.
 df_combined_fl <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
 plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
@@ -633,7 +727,9 @@ plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm
       x = "Fork Length (mm)", y = "Width (mm)") +
  theme(legend.position = "bottom")
 
-### Combined: Width ~ log(Mass) (log x) ###
+#### Combined 2: Width ~ Mass (log x-axis) ####----
+# Log-transforms mass to linearize the relationship; useful for comparing
+# how body width tracks mass gain across species of very different sizes.
 df_combined_mass_logx <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0)
 plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
@@ -642,12 +738,14 @@ plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes
       x = "Mass (g)", y = "Width (mm)") +
  theme(legend.position = "bottom")
 
-### Combined: log(Width) ~ log(Fork Length) ###
+#### Combined 3: log(Width) ~ log(Fork Length) (log-log) ####----
+# Log-log plot linearizes the power-law; parallel lines = same scaling exponent,
+# offset lines = same shape but different size at a given length.
+# Trend controlled by COMBINED_TREND_MODE.
 df_combined_loglog_fl <- df_all %>%
  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                !is.na(ForkLength_mm), ForkLength_mm > 0)
 
-# Base scatter + log scales
 plots[["combined"]][["loglog_width_by_FL"]] <-
  ggplot(df_combined_loglog_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
@@ -656,26 +754,27 @@ plots[["combined"]][["loglog_width_by_FL"]] <-
       x = "Fork Length (mm, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
 
-# Add trend(s) per toggle
 if (COMBINED_TREND_MODE == "overall") {
- # One global line across all species on log-log (original behavior)
+ # One global trend line across all species
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
   stat_smooth(method = "lm",
               formula = y ~ x, se = FALSE,
               mapping = aes(x = log(ForkLength_mm), y = log(Width_mm)),
               inherit.aes = FALSE, color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
- # One line per species (clearer)
+ # One trend line per species (clearer when species differ strongly)
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
   geom_smooth(method = "lm", se = FALSE)
-} # else "none": points only
+} # else "none": scatter points only
 
-### Combined: Power law (Width ~ Mass^b) ###
+#### Combined 4: Width ~ Mass^b (power-law, log-log) ####----
+# Visualizes allometric scaling of width with mass across species.
+# Steeper slopes indicate width grows faster relative to mass.
+# Trend controlled by COMBINED_TREND_MODE.
 df_combined_power_mass <- df_all %>%
  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                !is.na(Mass_g),   Mass_g > 0)
 
-# Base scatter + log scales
 plots[["combined"]][["powerlaw_width_by_mass"]] <-
  ggplot(df_combined_power_mass, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
@@ -684,7 +783,6 @@ plots[["combined"]][["powerlaw_width_by_mass"]] <-
       x = "Mass (g, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
 
-# Add trend(s) per toggle
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
   stat_smooth(method = "lm",
@@ -696,7 +794,9 @@ if (COMBINED_TREND_MODE == "overall") {
   geom_smooth(method = "lm", se = FALSE)
 } # else "none": no trend lines
 
-### Combined: Histogram of Fork Lengths by Species ###
+#### Combined 5: Fork Length histograms faceted by species ####----
+# Side-by-side size structure comparison; y-axes are free (scales = "free_y")
+# so rare species are still legible alongside abundant ones.
 df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
  geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
@@ -710,7 +810,10 @@ plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkL
  theme_minimal() +
  theme(legend.position = "none")
 
-# Show plots in RStudio viewer
+# Send all plots to the RStudio Plots/Viewer pane.
+# To view a single plot without printing all, use e.g.:
+#   plots[["Goldfish"]][["scatter_fl"]]
+#   plots[["combined"]][["hist_FL_by_species"]]
 print(plots)
 
 
@@ -741,10 +844,19 @@ df_species_counts <- df_all %>%
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present
 
- # Per-species plot export (compact)
+ # Per-species plot export (compact, all individual plots)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
 # ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
 # plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
+
+# Per-species patchwork panel export (16x20 inches recommended for legibility)
+for (sp in names(combined_all))
+ ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
+        plots[[sp]][["patchwork"]], width = 16, height = 20, dpi = 300)
+
+# Single-species patchwork export (swap species name as needed)
+# ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 16, height = 20, dpi = 300)
+# ggsave(file.path(path_figs_dir, "Rudd_patchwork.png"),     plots[["Rudd"]][["patchwork"]],     width = 16, height = 20, dpi = 300)
 
 ##### Cleanup (remove temporary loop/temp objects) #############----
 #-------------------------------------------------------------#
