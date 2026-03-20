@@ -501,7 +501,9 @@ for (param_species in names(combined_all)) {
  if (nrow(loop_loglog_fl) >= MIN_N_PER_SPECIES) {
   loop_p_loglog_fl <- ggplot(loop_loglog_fl, aes(ForkLength_mm, Width_mm)) +
    geom_point(color = "#4daf4a", alpha = 0.6, size = 2) +
-   scale_x_log10() + scale_y_log10() +
+   scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+   scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+   annotation_logticks(sides = "bl") +
    labs(
     title   = paste0(param_species, " - log(Width) ~ log(Fork Length)"),
     x       = "Fork Length (mm, log10 scale)",
@@ -559,7 +561,9 @@ for (param_species in names(combined_all)) {
  if (nrow(loop_power_mass) >= MIN_N_PER_SPECIES) {
   loop_p_power_mass <- ggplot(loop_power_mass, aes(Mass_g, Width_mm)) +
    geom_point(color = "#984ea3", alpha = 0.6, size = 2) +
-   scale_x_log10() + scale_y_log10() +
+   scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+   scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+   annotation_logticks(sides = "bl") +
    labs(
     title   = paste0(param_species, " - Power law: Width ~ Mass^b"),
     x       = "Mass (g, log10 scale)",
@@ -669,62 +673,41 @@ for (param_species in names(combined_all)) {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_hist_df, "No fork length data available.", param_species))
  }
- cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
-} # end species loop
+ #### Patchwork panel ####----
+ # Assembled here while all 6 plot objects are in scope.
+ # Only built if all regression plots had sufficient data (nrow >= MIN_N_PER_SPECIES).
+ # Layout: Histogram | Mass~FL  /  Width~FL | log(Width)~log(FL)  /  Mass~Width | Width~Mass^b
+ if (nrow(dplyr::filter(df_clean, !is.na(ForkLength_mm), !is.na(Width_mm)))     >= MIN_N_PER_SPECIES &&
+     nrow(dplyr::filter(df_clean, !is.na(Mass_g), Mass_g > 0, !is.na(Width_mm))) >= MIN_N_PER_SPECIES &&
+     nrow(dplyr::filter(df_clean, !is.na(ForkLength_mm), ForkLength_mm > 0, !is.na(Mass_g), Mass_g > 0)) >= MIN_N_PER_SPECIES) {
 
+  # Step 1: assemble layout and apply sub-plot theme adjustments.
+  # Two-step assignment ensures & theme() only affects sub-plots, not the panel title.
+  loop_pw <-
+   (plots[[param_species]][["hist_FL"]]      | plots[[param_species]][["FL_by_mass"]])          /
+   (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
+   (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) &
+   ggplot2::theme(
+    plot.title   = ggplot2::element_text(size = 9, face = "plain"),  # short sub-plot titles
+    plot.caption = ggplot2::element_blank()                          # redundant at panel level
+   )
 
-##### Per-species patchwork panels ############################----
-#-------------------------------------------------------------#
-# Assemble one patchwork panel per species using the 6 individual plots.
-# Layout (3 rows x 2 columns):
-#
-#   Histogram of FL      |  Mass ~ Fork Length
-#   Width ~ Fork Length  |  log(Width) ~ log(Fork Length)
-#   Mass ~ Width         |  Width ~ Mass^b (power law)
-#
-# Individual plot titles are stripped (species name is redundant once the
-# panel header is present). Captions are kept — they carry n, equations,
-# and stats that remain meaningful at the sub-plot level.
-#
-# Stored in plots[[species]][["patchwork"]] for access or export.
+  # Step 2: add panel-level title and letter tags (a)-(f).
+  plots[[param_species]][["patchwork"]] <- loop_pw +
+   patchwork::plot_annotation(
+    title      = param_species,
+    tag_levels = "a", tag_prefix = "(", tag_suffix = ")",
+    theme      = ggplot2::theme(
+     plot.title = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold")
+    )
+   )
 
-for (param_species in names(combined_all)) {
-
- sp_key <- tolower(trimws(param_species))
- if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) next
-
- # Skip patchwork if any regression plot was replaced with a placeholder.
- # Checks the same filters used in the species loop against MIN_N_PER_SPECIES.
- loop_sp_df <- combined_all[[param_species]]
- loop_n_checks <- c(
-  fl_width   = sum(!is.na(loop_sp_df$ForkLength_mm) & !is.na(loop_sp_df$Width_mm)),
-  mass_width = sum(!is.na(loop_sp_df$Mass_g)        & loop_sp_df$Mass_g > 0 & !is.na(loop_sp_df$Width_mm),     na.rm = TRUE),
-  fl_mass    = sum(!is.na(loop_sp_df$ForkLength_mm) & loop_sp_df$ForkLength_mm > 0 & !is.na(loop_sp_df$Mass_g) & loop_sp_df$Mass_g > 0, na.rm = TRUE)
- )
- if (any(loop_n_checks < MIN_N_PER_SPECIES)) {
-  cat("Skipping patchwork for", param_species, "— insufficient data in:",
-      paste(names(loop_n_checks)[loop_n_checks < MIN_N_PER_SPECIES], collapse = ", "), "\n")
-  next
+ } else {
+  cat("Skipping patchwork for", param_species, "— insufficient data for one or more regression plots.\n")
  }
 
- plots[[param_species]][["patchwork"]] <-
-  (plots[[param_species]][["hist_FL"]]      | plots[[param_species]][["FL_by_mass"]])          /
-  (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
-  (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) +
-  patchwork::plot_annotation(
-   title    = paste0(param_species),
-   theme    = ggplot2::theme(
-    plot.title    = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold"),
-    plot.subtitle = ggplot2::element_text(size = SUBTITLE_SIZE - 1, colour = "grey40")
-   )
-  ) &
-  ggplot2::theme(
-   plot.title   = ggplot2::element_blank(),  # species name in panel header instead
-   plot.caption = ggplot2::element_blank()   # n and descriptions redundant at panel level
-  )
-
- cat("Patchwork panel built:", param_species, "\n")
-}
+ cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
+} # end species loop
 
 
 ##### Multi-species plots #####################################----
@@ -867,9 +850,9 @@ df_species_counts <- df_all %>%
 # plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
 # Per-species patchwork panel export — letter size (8.5x11), all species at once
-# for (sp in names(combined_all))
-#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
-#         plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
+for (sp in names(combined_all))
+ ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
+        plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
 
 # Single-species patchwork export (swap species name as needed)
 # ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
