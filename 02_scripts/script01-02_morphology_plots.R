@@ -2,18 +2,18 @@
 ## Script name: script01-02_morphology_plots.R
 ##
 ## Purpose:
-##   - Use pre-cleaned data (from script01-02_import_format.R) to
+##   - Use pre-cleaned data (from script01-01_import_format_singlefile.R) to
 ##     generate morphology plots and simple regressions per species,
 ##     plus multi-species plots for each plot class.
 ##
-#### Repository layout (per template):
-##   01_data/                       # inputs
-##   01_data/processed/<species>/   # cleaned RDS per species
-##   03_outputs/01_figures/         # figures
-##   03_outputs/01_tables/          # tables (created if missing)
+## Repository layout:
+##   01_data/01_raw_files/          # inputs
+##   03_outputs/01_figures/         # figures (dated subfolder per run)
+##   03_outputs/01_tables/          # summary tables
 ##
 ## Author: Marcus Rizzuto
-## Date Created: 1/27/2026
+## Contributing author: Paul Bzonek
+## Date Created: 2026-01-27
 ##
 ## --------------------------------------------------------------#
 ##
@@ -95,10 +95,10 @@ MIN_N_PER_SPECIES <- 10
 COMBINED_TREND_MODE <- "overall"  # change to "per_species" or "none" if needed
 
 # ---- Histogram binning parameter (global) -------------------#
-# Fixed bin width applied uniformly across all species histograms.
+# Fixed bin width applied uniformly across all species histograms (units: mm).
 # Effect: smaller values show finer size-class detail but can look noisy on
 #         small samples; larger values smooth the distribution.
-BIN_WIDTH_CM <- 10   # 10 cm
+BIN_WIDTH_MM <- 10   # 10 mm
 
 # ---- Bar-spacing threshold (single reference line) ----------#
 # A dashed reference line is drawn at this width value on Width plots,
@@ -116,7 +116,7 @@ LEGEND_TITLE_SIZE <- 12
 LEGEND_TEXT_SIZE  <- 11
 CAPTION_SIZE      <- 10
 
-# Start from minimal but with a slightly larger base font
+# Apply typography settings globally
 theme_set(ggplot2::theme_minimal(base_size = 12))
 
 # Override key text elements globally
@@ -134,15 +134,7 @@ ggplot2::theme_update(
  legend.text   = ggplot2::element_text(size = LEGEND_TEXT_SIZE)
 )
 
-### Core Data Processing
-#----------------------------#
-# The main per-species processing loop builds:
-#   (1) Summary table row (with min/max)
-#   (2) 5 plots per species (with guards for min N where applicable)
-#   (3) QC flags (negative slope)
-
-
-##### Species Loop (plots + simple models only) ###############----
+##### Species Loop ############################################----
 #-------------------------------------------------------------#
 # For each species:
 #   - Compute summary statistics (counts, means, min/max)
@@ -150,23 +142,21 @@ ggplot2::theme_update(
 #   - Enforce minimum n thresholds for regressions (MIN_N_PER_SPECIES)
 #   - Record model coefficients and QC flags
 for (param_species in names(combined_all)) {
- 
+
  cat("\n--- Plotting:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "---\n")
  df_clean <- combined_all[[param_species]]
- 
+
  # Skip unknown/blank/NA species names (do not plot/export them)
- sp_raw <- param_species
- sp_key <- tolower(trimws(sp_raw))
- if (is.na(sp_raw) || sp_key %in% c("", "unknown", "unknown_species")) next
- 
+ sp_key <- tolower(trimws(param_species))
+ if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) next
+
  # Ensure per-species plot sublist exists before assigning plots
  if (is.null(plots[[param_species]]) || !is.list(plots[[param_species]])) {
   plots[[param_species]] <- list()
  }
- 
- ### Species-level summary row (with min/max) ###
- #----------------------------------------------#
- # Summarize counts and central tendency + ranges for key morphometrics.
+
+ #### Summary statistics ####----
+ # Counts, means, and ranges for key morphometrics — appended to df_combined_summary.
  df_summary <- df_clean %>%
   dplyr::summarise(
    species        = param_species,
@@ -185,14 +175,14 @@ for (param_species in names(combined_all)) {
    weight_max_g   = suppressWarnings(max(Mass_g,        na.rm = TRUE))
   )
  df_combined_summary <- dplyr::bind_rows(df_combined_summary, df_summary)
- 
- 
+
+
  #### Plot 1: Width ~ Fork Length (linear fit) ####----
  # Scatter with optional linear regression; equation and R² annotated on plot.
- 
+
  # Use only rows with both Width and ForkLength present
  loop_scatter_fl <- df_clean %>% dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
- 
+
  if (nrow(loop_scatter_fl) >= MIN_N_PER_SPECIES) {
   loop_p_scatter_fl <- ggplot(loop_scatter_fl, aes(ForkLength_mm, Width_mm)) +
    geom_point(color = "#2c7fb8", alpha = 0.6, size = 2) +
@@ -201,8 +191,8 @@ for (param_species in names(combined_all)) {
     x       = "Fork Length (mm)",
     y       = "Width (mm)",
     caption = make_caption(loop_scatter_fl, "Width vs fork length.", param_species)
-   ) 
-  
+   )
+
   # Fit requires at least 2 points
   if (nrow(loop_scatter_fl) >= 2) {
    loop_lm_fl    <- lm(Width_mm ~ ForkLength_mm, data = loop_scatter_fl)
@@ -210,14 +200,14 @@ for (param_species in names(combined_all)) {
    loop_r2_fl    <- summary(loop_lm_fl)$r.squared
    loop_slope_fl <- unname(loop_coef_fl[["ForkLength_mm"]])  # slope
    loop_int_fl   <- unname(loop_coef_fl[["(Intercept)"]])    # intercept
-   
+
    loop_eq_fl <- paste0(
     "Width = ", formatC(loop_slope_fl, format = "f", digits = 2),
     " · FL ", ifelse(loop_int_fl >= 0, "+ ", "- "),
     formatC(abs(loop_int_fl), format = "f", digits = 2), " (intercept)",
     "\nR^2 = ", formatC(loop_r2_fl, format = "f", digits = 3)
    )
-   
+
    loop_p_scatter_fl <- loop_p_scatter_fl +
     geom_smooth(method = "lm", se = FALSE, color = "#1f78b4", linewidth = 0.9) +
     annotate("text",
@@ -225,7 +215,7 @@ for (param_species in names(combined_all)) {
              y = quantile(loop_scatter_fl$Width_mm,      0.95, na.rm = TRUE),
              label = loop_eq_fl, hjust = 0, vjust = 1, size = 3.5)
   }
-  
+
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm ----
   if (is.finite(max(loop_scatter_fl$Width_mm, na.rm = TRUE)) &&
       max(loop_scatter_fl$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
@@ -242,19 +232,19 @@ for (param_species in names(combined_all)) {
                                       " < ", MIN_N_PER_SPECIES, ") for Width~FL plot."), param_species))
  }
  plots[[param_species]][["scatter_fl"]] <- loop_p_scatter_fl
- 
+
  #### Plot 2: Mass ~ Width (power-law, raw scale) ####----
  # Scatter with Mass on y, Width on x; fits W = a·X^b directly on the raw scale
  # using nls(), falling back to log-log with Duan's smearing correction if nls() fails.
  # Use this plot to predict mass from width in original units.
  # NOTE: Distinct from Plot 5 — Plot 2 uses Width as the predictor on raw axes;
  #       Plot 5 uses Mass as the predictor on log-log axes to visualize scaling.
- 
+
  # Keep only positive, non-missing values
  loop_scatter_mass <- df_clean %>%
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g   > 0)
- 
+
  # Prepare a model-row so we can append even if we don't fit
  model_row <- tibble(
   species = param_species,
@@ -264,9 +254,9 @@ for (param_species in names(combined_all)) {
   r2      = NA_real_,
   method  = NA_character_
  )
- 
+
  if (nrow(loop_scatter_mass) >= MIN_N_PER_SPECIES) {
-  
+
   # Base scatter (Mass vs Width)
   loop_p_scatter_mass <- ggplot(loop_scatter_mass, aes(x = Width_mm, y = Mass_g)) +
    geom_point(color = "#f16913", alpha = 0.6, size = 2) +
@@ -276,16 +266,16 @@ for (param_species in names(combined_all)) {
     y       = "Mass (g)",
     caption = make_caption(loop_scatter_mass, "Mass vs width with power-law fit; X = Width_mm.", param_species)
    )
-  
+
   # ----- Fit W = a * X^b on the original scale (preferred) -----------
   # 1) Starting values from log-log regression
   lm_start <- lm(log(Mass_g) ~ log(Width_mm), data = loop_scatter_mass)
   b0       <- unname(coef(lm_start)[2])
   a0       <- exp(unname(coef(lm_start)[1]))
-  
+
   # 2) Try nls(); if it fails, fall back to log–log with Duan smearing
   fit_info <- list(method = NA_character_, a = NA_real_, b = NA_real_, r2 = NA_real_)
-  
+
   nls_fit <- try(
    nls(Mass_g ~ a * (Width_mm ^ b),
        data = loop_scatter_mass,
@@ -293,7 +283,7 @@ for (param_species in names(combined_all)) {
        control = nls.control(maxiter = 200, warnOnly = TRUE)),
    silent = TRUE
   )
-  
+
   if (!inherits(nls_fit, "try-error")) {
    # nls success on raw scale
    a_hat <- unname(coef(nls_fit)["a"])
@@ -301,9 +291,9 @@ for (param_species in names(combined_all)) {
    y     <- loop_scatter_mass$Mass_g
    yhat  <- fitted(nls_fit)
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-   
+
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
-   
+
   } else {
    # Fallback: log–log with Duan’s smearing correction
    lm_fit <- lm(log(Mass_g) ~ log(Width_mm), data = loop_scatter_mass)
@@ -311,40 +301,39 @@ for (param_species in names(combined_all)) {
    a_raw  <- exp(unname(coef(lm_fit)[1]))
    smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing factor
    a_hat  <- a_raw * smear
-   
+
    y     <- loop_scatter_mass$Mass_g
    yhat  <- a_hat * (loop_scatter_mass$Width_mm ^ b_hat)
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-   
+
    fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
   }
-  
+
   # ----- Prediction curve on original axes ---------------------------
   x_rng_w <- range(loop_scatter_mass$Width_mm, na.rm = TRUE)
   x_seq_w <- seq(x_rng_w[1], x_rng_w[2], length.out = 200)
-  
+
   pred_curve <- tibble(Width_mm = x_seq_w) |>
    dplyr::mutate(Mass_pred = fit_info$a * (Width_mm ^ fit_info$b))
-  
+
   loop_p_scatter_mass <- loop_p_scatter_mass +
    geom_line(data = pred_curve, aes(x = Width_mm, y = Mass_pred),
              color = "#cc4c02", linewidth = 1)
-  
+
   # ----- Equation annotation (use generic X to avoid implying girth) --
   a_lbl  <- formatC(fit_info$a, format = "e", digits = 2)  # 'a' often small; scientific notation
   b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
-  
+
   eq_label <- paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl)
-  
+
   loop_p_scatter_mass <- loop_p_scatter_mass +
    annotate("text",
             x = quantile(loop_scatter_mass$Width_mm, 0.05, na.rm = TRUE),
             y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
             label = eq_label,
             hjust = 0, vjust = 1, size = 3.5)
-  
-  # Optional: keep your 50 mm reference line behavior
+
   if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
       max(loop_scatter_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
    loop_p_scatter_mass <- loop_p_scatter_mass +
@@ -352,7 +341,7 @@ for (param_species in names(combined_all)) {
                linetype = "dashed", color = "firebrick",
                linewidth = 0.5, alpha = 0.8)
   }
-  
+
   # Record fitted parameters
   model_row <- tibble(
    species = param_species,
@@ -362,7 +351,7 @@ for (param_species in names(combined_all)) {
    r2      = fit_info$r2,
    method  = fit_info$method
   )
-  
+
  } else {
   loop_p_scatter_mass <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_scatter_mass,
@@ -370,22 +359,21 @@ for (param_species in names(combined_all)) {
                                       " < ", MIN_N_PER_SPECIES, ") for Mass~Width (power-law)."),
                                param_species))
  }
- 
- # Store the plot and the model row (same destinations as before)
+
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
- 
+
  #### Plot 3: Mass ~ Fork Length (power-law, raw scale) ####----
  # Scatter with Mass on y, Fork Length on x; fits W = a·L^b on the raw scale.
  # Standard fisheries length-weight relationship plot.
- 
+
  # Use only rows with positive W and L
  loop_fl_mass <- df_clean %>%
   dplyr::filter(!is.na(ForkLength_mm), ForkLength_mm > 0,
                 !is.na(Mass_g),       Mass_g       > 0)
- 
+
  if (nrow(loop_fl_mass) >= MIN_N_PER_SPECIES) {
-  
+
   # Base scatter
   loop_p_fl_mass <- ggplot(loop_fl_mass, aes(x = ForkLength_mm, y = Mass_g)) +
    geom_point(color = "#d95f02", alpha = 0.6, size = 2) +
@@ -395,17 +383,16 @@ for (param_species in names(combined_all)) {
     y       = "Mass (g)",
     caption = make_caption(loop_fl_mass, "Mass vs fork length with power-law fit (W = a·L^b).", param_species)
    )
-  
+
   # ----- Fit W = a * L^b ----------------------------------------------
   # 1) Get robust starting values from log-log linear fit
   lm_start   <- lm(log(Mass_g) ~ log(ForkLength_mm), data = loop_fl_mass)
   b0         <- unname(coef(lm_start)[2])
   a0         <- exp(unname(coef(lm_start)[1]))
-  
+
   # 2) Try nls() on the original scale; if it fails, fall back to log-log with smearing
   fit_info <- list(method = NA_character_, a = NA_real_, b = NA_real_, r2 = NA_real_)
-  
-  nls_ok <- TRUE
+
   nls_fit <- try(
    nls(Mass_g ~ a * (ForkLength_mm ^ b),
        data = loop_fl_mass,
@@ -413,22 +400,20 @@ for (param_species in names(combined_all)) {
        control = nls.control(maxiter = 200, warnOnly = TRUE)),
    silent = TRUE
   )
-  
-  if (inherits(nls_fit, "try-error")) nls_ok <- FALSE
-  
-  if (nls_ok) {
+
+  if (!inherits(nls_fit, "try-error")) {
    # Extract coefficients from nls
    coef_nls <- coef(nls_fit)
    a_hat    <- unname(coef_nls["a"])
    b_hat    <- unname(coef_nls["b"])
-   
+
    # Raw-scale R^2 (pseudo-R^2)
    y     <- loop_fl_mass$Mass_g
    yhat  <- fitted(nls_fit)
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-   
+
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
-   
+
   } else {
    # ----- Fallback: log-log fit with Duan's smearing correction -----
    # log(W) = log(a) + b log(L)  =>  W = a * L^b, with a corrected by smearing factor
@@ -437,43 +422,43 @@ for (param_species in names(combined_all)) {
    a_raw  <- exp(unname(coef(lm_fit)[1]))
    smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing
    a_hat  <- a_raw * smear
-   
+
    # R^2 on raw scale using back-transformed fitted values
    y     <- loop_fl_mass$Mass_g
    yhat  <- a_hat * (loop_fl_mass$ForkLength_mm ^ b_hat)
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-   
+
    fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
   }
-  
+
   # ----- Prediction curve on original axes ---------------------------
   x_rng_fl <- range(loop_fl_mass$ForkLength_mm, na.rm = TRUE)
   x_seq_fl <- seq(x_rng_fl[1], x_rng_fl[2], length.out = 200)
-  
+
   pred_curve <- tibble(ForkLength_mm = x_seq_fl) |>
    dplyr::mutate(Mass_pred = fit_info$a * (ForkLength_mm ^ fit_info$b))
-  
+
   loop_p_fl_mass <- loop_p_fl_mass +
    geom_line(data = pred_curve, aes(x = ForkLength_mm, y = Mass_pred),
              color = "#bf5b17", linewidth = 1)
-  
+
   # ----- Equation annotation: W = a · L^b ----------------------------
   # 'a' can be small; show in engineering/scientific format
   a_lbl <- formatC(fit_info$a, format = "e", digits = 2)
   b_lbl <- formatC(fit_info$b, format = "f", digits = 3)
   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
-  
+
   eq_label <- paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl)
-  
+
   loop_p_fl_mass <- loop_p_fl_mass +
    annotate(
     "text",
     x = quantile(loop_fl_mass$ForkLength_mm, 0.05, na.rm = TRUE),
     y = quantile(loop_fl_mass$Mass_g,        0.95, na.rm = TRUE),
     label = eq_label,
-    hjust = 0, vjust = 1, size = 3.6
+    hjust = 0, vjust = 1, size = 3.5
    )
-  
+
  } else {
   loop_p_fl_mass <- ggplot() + theme_void() +
    labs(
@@ -485,19 +470,18 @@ for (param_species in names(combined_all)) {
     )
    )
  }
- 
- # Store the plot (same slot name as before)
+
  plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
 
  #### Plot 4: log(Width) ~ log(Fork Length) (log-log axes) ####----
  # Both axes on log10 scale; linearizes the power-law relationship.
  # Good for checking whether Width and Fork Length scale allometrically.
- 
+
  # Use positive values only for log transformation
  loop_loglog_fl <- df_clean %>%
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(ForkLength_mm), ForkLength_mm > 0)
- 
+
  if (nrow(loop_loglog_fl) >= MIN_N_PER_SPECIES) {
   loop_p_loglog_fl <- ggplot(loop_loglog_fl, aes(ForkLength_mm, Width_mm)) +
    geom_point(color = "#4daf4a", alpha = 0.6, size = 2) +
@@ -509,21 +493,21 @@ for (param_species in names(combined_all)) {
     x       = "Fork Length (mm, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_loglog_fl, "log(Width) vs log(ForkLength).", param_species)
-   ) 
-  
+   )
+
   if (nrow(loop_loglog_fl) >= 3) {
    loop_fit_ll   <- lm(log(Width_mm) ~ log(ForkLength_mm), data = loop_loglog_fl)
    loop_coefs_ll <- coef(loop_fit_ll)
    loop_r2_ll    <- summary(loop_fit_ll)$r.squared
    loop_slope_ll <- unname(loop_coefs_ll[["log(ForkLength_mm)"]])  # slope in log space
    loop_int_ll   <- unname(loop_coefs_ll[["(Intercept)"]])
-   
+
    # Predict on original scale across observed ForkLength range
    loop_rng_x_fl <- range(loop_loglog_fl$ForkLength_mm, na.rm = TRUE)
    loop_xseq_fl  <- seq(loop_rng_x_fl[1], loop_rng_x_fl[2], length.out = 200)
    loop_pred_ll  <- tibble(ForkLength_mm = loop_xseq_fl) %>%
     dplyr::mutate(Width_pred = exp(loop_int_ll + loop_slope_ll * log(ForkLength_mm)))
-   
+
    loop_p_loglog_fl <- loop_p_loglog_fl +
     geom_line(data = loop_pred_ll, aes(ForkLength_mm, Width_pred),
               color = "#238b45", linewidth = 1) +
@@ -544,20 +528,20 @@ for (param_species in names(combined_all)) {
                                param_species))
  }
  plots[[param_species]][["loglog_width_by_FL"]] <- loop_p_loglog_fl
- 
- 
+
+
  #### Plot 5: Width ~ Mass^b (power-law, log-log axes) ####----
  # Both axes on log10 scale; Mass is the predictor, Width is the response.
  # Fit via log-log linear regression: log(Width) = b·log(Mass) + log(a).
  # NOTE: Distinct from Plot 2 — here Mass drives Width (reverse direction),
  #       and the fit is on log-log axes rather than the raw scale.
  #       Use this plot to visualize the allometric scaling exponent b.
- 
+
  # Use positive values only for log transformation
  loop_power_mass <- df_clean %>%
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g > 0)
- 
+
  if (nrow(loop_power_mass) >= MIN_N_PER_SPECIES) {
   loop_p_power_mass <- ggplot(loop_power_mass, aes(Mass_g, Width_mm)) +
    geom_point(color = "#984ea3", alpha = 0.6, size = 2) +
@@ -569,8 +553,8 @@ for (param_species in names(combined_all)) {
     x       = "Mass (g, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_power_mass, "Power-law width vs mass.", param_species)
-   ) 
-  
+   )
+
   if (nrow(loop_power_mass) >= 3) {
    loop_fit_pw   <- lm(log(Width_mm) ~ log(Mass_g), data = loop_power_mass)
    loop_coefs_pw <- coef(loop_fit_pw)
@@ -578,13 +562,13 @@ for (param_species in names(combined_all)) {
    loop_b_pw     <- unname(loop_coefs_pw[["log(Mass_g)"]])  # exponent b
    loop_log_a_pw <- unname(loop_coefs_pw[["(Intercept)"]])
    loop_a_pw     <- exp(loop_log_a_pw)                      # coefficient a
-   
+
    # Predict on original scale across observed Mass range
    loop_rng_x_mass <- range(loop_power_mass$Mass_g, na.rm = TRUE)
    loop_xseq_mass2 <- seq(loop_rng_x_mass[1], loop_rng_x_mass[2], length.out = 200)
    loop_pred_pw    <- tibble(Mass_g = loop_xseq_mass2) %>%
     dplyr::mutate(Width_pred = loop_a_pw * (Mass_g ^ loop_b_pw))
-   
+
    loop_p_power_mass <- loop_p_power_mass +
     geom_line(data = loop_pred_pw, aes(Mass_g, Width_pred),
               color = "#6a51a3", linewidth = 1) +
@@ -596,7 +580,7 @@ for (param_species in names(combined_all)) {
                             "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
   }
-  
+
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (log scale OK) ----
   if (is.finite(max(loop_power_mass$Width_mm, na.rm = TRUE)) &&
       max(loop_power_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
@@ -605,7 +589,7 @@ for (param_species in names(combined_all)) {
                linetype = "dashed", color = "firebrick",
                linewidth = 0.5, alpha = 0.8)
   }
-  
+
  } else {
   loop_p_power_mass <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_power_mass,
@@ -614,16 +598,16 @@ for (param_species in names(combined_all)) {
                                param_species))
  }
  plots[[param_species]][["powerlaw_width_by_mass"]] <- loop_p_power_mass
- 
- 
+
+
  #### Plot 6: Fork Length histogram ####----
- # Fixed bin width (BIN_WIDTH_CM) across all species for direct comparison.
+ # Fixed bin width (BIN_WIDTH_MM) across all species for direct comparison.
  # Red solid line = mean; green dashed line = median.
- 
+
  # Data for histogram
  loop_hist_df <- df_clean %>%
   dplyr::filter(!is.na(ForkLength_mm))
- 
+
  # Only build if we have *some* data points (>= 1).
  loop_hist_caption <- NA_character_  # populated below; used in patchwork panel caption
  if (nrow(loop_hist_df) >= 1) {
@@ -639,10 +623,10 @@ for (param_species in names(combined_all)) {
    "Mean fork length: ", formatC(loop_fl_mean,   digits = 1, format = "f"), " mm  |  ",
    "Mean mass: ",        formatC(loop_mean_mass, digits = 1, format = "f"), " g"
   )
-  
+
   p_hist_fl <- ggplot(loop_hist_df, aes(x = ForkLength_mm)) +
    geom_histogram(
-    binwidth = BIN_WIDTH_CM,        # <--- fixed width (10 cm)
+    binwidth = BIN_WIDTH_MM,        # fixed width (10 mm)
     boundary = 0,
     color = "grey30",
     fill = "#74a9cf",
@@ -664,7 +648,7 @@ for (param_species in names(combined_all)) {
      loop_hist_df,
      paste0(
       "Histogram of fork lengths. Fixed bin width = ",
-      formatC(BIN_WIDTH_CM, digits = 0, format = "f"), " cm. ",
+      formatC(BIN_WIDTH_MM, digits = 0, format = "f"), " mm. ",
       "Red = mean (", formatC(loop_fl_mean, digits = 1, format = "f"),
       " mm), green dashed = median (", formatC(loop_fl_median, digits = 1, format = "f"), " mm)."
      ),
@@ -676,7 +660,7 @@ for (param_species in names(combined_all)) {
   minor_breaks = scales::breaks_width(25),
   expand = c(0.01, 0)
  )
-  
+
   plots[[param_species]][["hist_FL"]] <- p_hist_fl
  } else {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
@@ -760,7 +744,9 @@ df_combined_loglog_fl <- df_all %>%
 plots[["combined"]][["loglog_width_by_FL"]] <-
  ggplot(df_combined_loglog_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- scale_x_log10() + scale_y_log10() +
+ scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+ scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+ annotation_logticks(sides = "bl") +
  labs(title = "All species - log(Width) ~ log(Fork Length)",
       x = "Fork Length (mm, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
@@ -789,7 +775,9 @@ df_combined_power_mass <- df_all %>%
 plots[["combined"]][["powerlaw_width_by_mass"]] <-
  ggplot(df_combined_power_mass, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- scale_x_log10() + scale_y_log10() +
+ scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+ scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
+ annotation_logticks(sides = "bl") +
  labs(title = "All species - Power law: Width ~ Mass^b",
       x = "Mass (g, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
@@ -811,7 +799,7 @@ if (COMBINED_TREND_MODE == "overall") {
 df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
  geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
-                binwidth = BIN_WIDTH_CM, boundary = 0) +
+                binwidth = BIN_WIDTH_MM, boundary = 0) +
  labs(
   title = "Histogram of Fork Lengths by Species",
   x = "Fork Length (mm)",
