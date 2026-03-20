@@ -113,6 +113,11 @@ for (param_species in names(combined_all)) {
  cat("\n--- Plotting:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "---\n")
  df_clean <- combined_all[[param_species]]
  
+ # Skip unknown/blank/NA species names (do not plot/export them)
+ sp_raw <- param_species
+ sp_key <- tolower(trimws(sp_raw))
+ if (is.na(sp_raw) || sp_key %in% c("", "unknown", "unknown_species")) next
+ 
  # Ensure per-species plot sublist exists before assigning plots
  if (is.null(plots[[param_species]]) || !is.list(plots[[param_species]])) {
   plots[[param_species]] <- list()
@@ -197,80 +202,104 @@ for (param_species in names(combined_all)) {
  }
  plots[[param_species]][["scatter_fl"]] <- loop_p_scatter_fl
  
- #### Plot 2: Width ~ log(Mass) (Mass on Y) -------------------#
- ### Scatter with Mass on y, model still Width ~ ln(Mass); inverse curve + fitted-form equation ###
+ #### Plot 2: Mass (W) by Width (X = Width_mm), using W = a · X^b ----
+ ### Scatter with Mass on y, Width on x; fit power-law on the raw scale ###
  
- # Use only rows with Width and positive Mass
+ # Keep only positive, non-missing values
  loop_scatter_mass <- df_clean %>%
-  dplyr::filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0)
+  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
+                !is.na(Mass_g),   Mass_g   > 0)
  
- # Initialize model row (remains NA if too few points)
- temp_model_row <- tibble(
+ # Prepare a model-row so we can append even if we don't fit
+ model_row <- tibble(
   species = param_species,
   n_used  = nrow(loop_scatter_mass),
-  alpha   = NA_real_,   # slope for ln(Mass)
-  beta    = NA_real_,   # intercept
+  a       = NA_real_,
+  b       = NA_real_,
   r2      = NA_real_,
-  flag_negative_slope = NA  # TRUE if alpha < 0
+  method  = NA_character_
  )
  
  if (nrow(loop_scatter_mass) >= MIN_N_PER_SPECIES) {
-  # MASS on Y, WIDTH on X
+  
+  # Base scatter (Mass vs Width)
   loop_p_scatter_mass <- ggplot(loop_scatter_mass, aes(x = Width_mm, y = Mass_g)) +
    geom_point(color = "#f16913", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(param_species, " - Mass by Width"),
+    title   = paste0(param_species, " - Mass by Width "),
     x       = "Width (mm)",
     y       = "Mass (g)",
-    caption = make_caption(loop_scatter_mass, "Mass vs width (model on ln(Mass)).", param_species)
-   ) 
+    caption = make_caption(loop_scatter_mass, "Mass vs width with power-law fit; X = Width_mm.", param_species)
+   )
   
-  if (nrow(loop_scatter_mass) >= 3) {
-   # Fit original model (predicting Width): Width = alpha * ln(Mass) + beta
-   loop_log_fit_mass <- lm(Width_mm ~ log(Mass_g), data = loop_scatter_mass)
-   loop_coefs_mass   <- coef(loop_log_fit_mass)
-   loop_alpha_mass   <- unname(loop_coefs_mass["log(Mass_g)"])     # slope alpha
-   loop_beta_mass    <- unname(loop_coefs_mass["(Intercept)"])     # intercept beta
-   loop_r2_mass      <- summary(loop_log_fit_mass)$r.squared
+  # ----- Fit W = a * X^b on the original scale (preferred) -----------
+  # 1) Starting values from log-log regression
+  lm_start <- lm(log(Mass_g) ~ log(Width_mm), data = loop_scatter_mass)
+  b0       <- unname(coef(lm_start)[2])
+  a0       <- exp(unname(coef(lm_start)[1]))
+  
+  # 2) Try nls(); if it fails, fall back to log–log with Duan smearing
+  fit_info <- list(method = NA_character_, a = NA_real_, b = NA_real_, r2 = NA_real_)
+  
+  nls_fit <- try(
+   nls(Mass_g ~ a * (Width_mm ^ b),
+       data = loop_scatter_mass,
+       start = list(a = a0, b = b0),
+       control = nls.control(maxiter = 200, warnOnly = TRUE)),
+   silent = TRUE
+  )
+  
+  if (!inherits(nls_fit, "try-error")) {
+   # nls success on raw scale
+   a_hat <- unname(coef(nls_fit)["a"])
+   b_hat <- unname(coef(nls_fit)["b"])
+   y     <- loop_scatter_mass$Mass_g
+   yhat  <- fitted(nls_fit)
+   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
    
-   temp_model_row <- tibble(
-    species = param_species,
-    n_used  = nrow(loop_scatter_mass),
-    alpha   = loop_alpha_mass,
-    beta    = loop_beta_mass,
-    r2      = loop_r2_mass,
-    flag_negative_slope = is.finite(loop_alpha_mass) && loop_alpha_mass < 0
-   )
+   fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
    
-   # Invert model to draw curve on flipped axes:
-   # Width = alpha*ln(Mass) + beta  ==>  Mass = exp((Width - beta)/alpha)
-   x_rng_w  <- range(loop_scatter_mass$Width_mm, na.rm = TRUE)
-   x_seq_w  <- seq(x_rng_w[1], x_rng_w[2], length.out = 200)
-   pred_inv <- tibble(Width_mm = x_seq_w) %>%
-    dplyr::mutate(Mass_pred = exp((Width_mm - loop_beta_mass) / loop_alpha_mass))
+  } else {
+   # Fallback: log–log with Duan’s smearing correction
+   lm_fit <- lm(log(Mass_g) ~ log(Width_mm), data = loop_scatter_mass)
+   b_hat  <- unname(coef(lm_fit)[2])
+   a_raw  <- exp(unname(coef(lm_fit)[1]))
+   smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing factor
+   a_hat  <- a_raw * smear
    
-   loop_p_scatter_mass <- loop_p_scatter_mass +
-    geom_line(data = pred_inv, aes(x = Width_mm, y = Mass_pred), color = "#cc4c02", linewidth = 1)
+   y     <- loop_scatter_mass$Mass_g
+   yhat  <- a_hat * (loop_scatter_mass$Width_mm ^ b_hat)
+   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
    
-# ---- Equation annotation  ----
-   loop_eq_mass <- paste0(
-    "y = ", formatC(loop_alpha_mass, format = "f", digits = 2), " ln(Mass)",
-    ifelse(loop_beta_mass >= 0, " + ", " - "),
-    formatC(abs(loop_beta_mass), format = "f", digits = 2),
-    "\nR^2 = ", formatC(loop_r2_mass, format = "f", digits = 4)
-   )
-   
-   loop_p_scatter_mass <- loop_p_scatter_mass +
-    annotate(
-     "text",
-     x = quantile(loop_scatter_mass$Width_mm, 0.05, na.rm = TRUE),
-     y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
-     label = loop_eq_mass,
-     hjust = 0, vjust = 1, size = 3.5
-    )
+   fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
   }
   
-  # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (Width on x) ----
+  # ----- Prediction curve on original axes ---------------------------
+  x_rng_w <- range(loop_scatter_mass$Width_mm, na.rm = TRUE)
+  x_seq_w <- seq(x_rng_w[1], x_rng_w[2], length.out = 200)
+  
+  pred_curve <- tibble(Width_mm = x_seq_w) |>
+   dplyr::mutate(Mass_pred = fit_info$a * (Width_mm ^ fit_info$b))
+  
+  loop_p_scatter_mass <- loop_p_scatter_mass +
+   geom_line(data = pred_curve, aes(x = Width_mm, y = Mass_pred),
+             color = "#cc4c02", linewidth = 1)
+  
+  # ----- Equation annotation (use generic X to avoid implying girth) --
+  a_lbl  <- formatC(fit_info$a, format = "e", digits = 2)  # 'a' often small; scientific notation
+  b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
+  r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
+  
+  eq_label <- paste0("W = ", a_lbl, " · X^", b_lbl, r2_lbl, "\n(X = Width_mm)")
+  
+  loop_p_scatter_mass <- loop_p_scatter_mass +
+   annotate("text",
+            x = quantile(loop_scatter_mass$Width_mm, 0.05, na.rm = TRUE),
+            y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
+            label = eq_label,
+            hjust = 0, vjust = 1, size = 3.5)
+  
+  # Optional: keep your 50 mm reference line behavior
   if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
       max(loop_scatter_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
    loop_p_scatter_mass <- loop_p_scatter_mass +
@@ -279,87 +308,140 @@ for (param_species in names(combined_all)) {
                linewidth = 0.5, alpha = 0.8)
   }
   
+  # Record fitted parameters
+  model_row <- tibble(
+   species = param_species,
+   n_used  = nrow(loop_scatter_mass),
+   a       = fit_info$a,
+   b       = fit_info$b,
+   r2      = fit_info$r2,
+   method  = fit_info$method
+  )
+  
  } else {
   loop_p_scatter_mass <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_scatter_mass,
                                paste0("Insufficient data (n = ", nrow(loop_scatter_mass),
-                                      " < ", MIN_N_PER_SPECIES, ") for Mass~Width plot."),
+                                      " < ", MIN_N_PER_SPECIES, ") for Mass~Width (power-law)."),
                                param_species))
  }
  
- # Store the plot and model row
+ # Store the plot and the model row (same destinations as before)
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
- df_combined_models <- dplyr::bind_rows(df_combined_models, temp_model_row)
+ df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
  
- #### Plot 3: Fork Length ~ Mass (Mass on Y) ####################
- ### Scatter with Mass on y, model still FL ~ ln(Mass); inverse curve + fitted-form equation ###
+ #### Plot 3: Mass (W) by Fork Length (L) using W = a * L^b ########
+ ### Scatter with Mass on y, Fork Length on x; fit power-law on raw scale ###
  
- # Use only rows with both FL and Mass present and Mass > 0
+ # Use only rows with positive W and L
  loop_fl_mass <- df_clean %>%
-  dplyr::filter(!is.na(ForkLength_mm), !is.na(Mass_g), Mass_g > 0)
+  dplyr::filter(!is.na(ForkLength_mm), ForkLength_mm > 0,
+                !is.na(Mass_g),       Mass_g       > 0)
  
  if (nrow(loop_fl_mass) >= MIN_N_PER_SPECIES) {
-  # MASS on Y, FORK LENGTH on X
+  
+  # Base scatter
   loop_p_fl_mass <- ggplot(loop_fl_mass, aes(x = ForkLength_mm, y = Mass_g)) +
    geom_point(color = "#d95f02", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(param_species, " - Mass by Fork Length"),
+    title   = paste0(param_species, " - Mass by Fork Length "),
     x       = "Fork Length (mm)",
     y       = "Mass (g)",
-    caption = make_caption(loop_fl_mass, "Mass vs fork length (model on ln(Mass)).", param_species)
-   ) 
-  
-  # Fit requires ≥3 points
-  if (nrow(loop_fl_mass) >= 3) {
-   # Fit original model (predicting FL): FL = slope_lnx * ln(Mass) + int_lnx
-   loop_lm_flm <- lm(ForkLength_mm ~ log(Mass_g), data = loop_fl_mass)
-   loop_coef   <- coef(loop_lm_flm)
-   slope_lnx   <- unname(loop_coef["log(Mass_g)"])  # slope on ln(Mass)
-   int_lnx     <- unname(loop_coef["(Intercept)"])  # intercept
-   r2_lnx      <- summary(loop_lm_flm)$r.squared
-   
-   # Invert for plotting on flipped axes:
-   # FL = slope*ln(Mass) + intercept  ==>  Mass = exp((FL - intercept)/slope)
-   x_rng_fl <- range(loop_fl_mass$ForkLength_mm, na.rm = TRUE)
-   x_seq_fl <- seq(x_rng_fl[1], x_rng_fl[2], length.out = 200)
-   pred_inv <- tibble(ForkLength_mm = x_seq_fl) %>%
-    dplyr::mutate(Mass_pred = exp((ForkLength_mm - int_lnx) / slope_lnx))
-   
-   loop_p_fl_mass <- loop_p_fl_mass +
-    geom_line(data = pred_inv, aes(x = ForkLength_mm, y = Mass_pred), color = "#bf5b17", linewidth = 1)
-   
-   # ---- Equation annotation (display with y = ..., to match other graphs) ----
-   loop_eq <- paste0(
-    "y = ", formatC(slope_lnx, format = "f", digits = 2), " ln(Mass)",
-    ifelse(int_lnx >= 0, " + ", " - "),
-    formatC(abs(int_lnx), format = "f", digits = 2),
-    "\nR^2 = ", formatC(r2_lnx, format = "f", digits = 4)
+    caption = make_caption(loop_fl_mass, "Mass vs fork length with power-law fit (W = a·L^b).", param_species)
    )
+  
+  # ----- Fit W = a * L^b ----------------------------------------------
+  # 1) Get robust starting values from log-log linear fit
+  lm_start   <- lm(log(Mass_g) ~ log(ForkLength_mm), data = loop_fl_mass)
+  b0         <- unname(coef(lm_start)[2])
+  a0         <- exp(unname(coef(lm_start)[1]))
+  
+  # 2) Try nls() on the original scale; if it fails, fall back to log-log with smearing
+  fit_info <- list(method = NA_character_, a = NA_real_, b = NA_real_, r2 = NA_real_)
+  
+  nls_ok <- TRUE
+  nls_fit <- try(
+   nls(Mass_g ~ a * (ForkLength_mm ^ b),
+       data = loop_fl_mass,
+       start = list(a = a0, b = b0),
+       control = nls.control(maxiter = 200, warnOnly = TRUE)),
+   silent = TRUE
+  )
+  
+  if (inherits(nls_fit, "try-error")) nls_ok <- FALSE
+  
+  if (nls_ok) {
+   # Extract coefficients from nls
+   coef_nls <- coef(nls_fit)
+   a_hat    <- unname(coef_nls["a"])
+   b_hat    <- unname(coef_nls["b"])
    
-   loop_p_fl_mass <- loop_p_fl_mass +
-    annotate(
-     "text",
-     x = quantile(loop_fl_mass$ForkLength_mm, 0.05, na.rm = TRUE),
-     y = quantile(loop_fl_mass$Mass_g,        0.95, na.rm = TRUE),
-     label = loop_eq,
-     hjust = 0, vjust = 1, size = 3.5
-    )
+   # Raw-scale R^2 (pseudo-R^2)
+   y     <- loop_fl_mass$Mass_g
+   yhat  <- fitted(nls_fit)
+   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
+   
+   fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
+   
+  } else {
+   # ----- Fallback: log-log fit with Duan's smearing correction -----
+   # log(W) = log(a) + b log(L)  =>  W = a * L^b, with a corrected by smearing factor
+   lm_fit <- lm(log(Mass_g) ~ log(ForkLength_mm), data = loop_fl_mass)
+   b_hat  <- unname(coef(lm_fit)[2])
+   a_raw  <- exp(unname(coef(lm_fit)[1]))
+   smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing
+   a_hat  <- a_raw * smear
+   
+   # R^2 on raw scale using back-transformed fitted values
+   y     <- loop_fl_mass$Mass_g
+   yhat  <- a_hat * (loop_fl_mass$ForkLength_mm ^ b_hat)
+   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
+   
+   fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
   }
+  
+  # ----- Prediction curve on original axes ---------------------------
+  x_rng_fl <- range(loop_fl_mass$ForkLength_mm, na.rm = TRUE)
+  x_seq_fl <- seq(x_rng_fl[1], x_rng_fl[2], length.out = 200)
+  
+  pred_curve <- tibble(ForkLength_mm = x_seq_fl) |>
+   dplyr::mutate(Mass_pred = fit_info$a * (ForkLength_mm ^ fit_info$b))
+  
+  loop_p_fl_mass <- loop_p_fl_mass +
+   geom_line(data = pred_curve, aes(x = ForkLength_mm, y = Mass_pred),
+             color = "#bf5b17", linewidth = 1)
+  
+  # ----- Equation annotation: W = a · L^b ----------------------------
+  # 'a' can be small; show in engineering/scientific format
+  a_lbl <- formatC(fit_info$a, format = "e", digits = 2)
+  b_lbl <- formatC(fit_info$b, format = "f", digits = 3)
+  r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
+  
+  eq_label <- paste0("W = ", a_lbl, " · L^", b_lbl, r2_lbl)
+  
+  loop_p_fl_mass <- loop_p_fl_mass +
+   annotate(
+    "text",
+    x = quantile(loop_fl_mass$ForkLength_mm, 0.05, na.rm = TRUE),
+    y = quantile(loop_fl_mass$Mass_g,        0.95, na.rm = TRUE),
+    label = eq_label,
+    hjust = 0, vjust = 1, size = 3.6
+   )
+  
  } else {
   loop_p_fl_mass <- ggplot() + theme_void() +
    labs(
     caption = make_caption(
      loop_fl_mass,
      paste0("Insufficient data (n = ", nrow(loop_fl_mass),
-            " < ", MIN_N_PER_SPECIES, ") for Mass~Fork Length plot."),
+            " < ", MIN_N_PER_SPECIES, ") for Mass~Fork Length (power-law) plot."),
      param_species
     )
    )
  }
  
- # Store the plot
+ # Store the plot (same slot name as before)
  plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
-
 
  #### Plot 4: log(Width) ~ log(Fork Length) (log-log) --------#
  ### Minor: Scatter on original scale + log-log fit, line drawn on original scale ###
@@ -659,7 +741,7 @@ df_species_counts <- df_all %>%
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present
 
-# Per-species plot export (compact)
+ # Per-species plot export (compact)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
 # ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
 # plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
