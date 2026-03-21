@@ -222,7 +222,7 @@ for (param_species in names(combined_all)) {
       max(loop_scatter_fl$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
    loop_p_scatter_fl <- loop_p_scatter_fl +
     geom_hline(yintercept = BAR_THRESHOLD_MM,
-               linetype = "dashed", color = "firebrick",
+               linetype = "dashed", color = "black",
                linewidth = 0.5, alpha = 0.8)
   }
  } else {
@@ -328,7 +328,7 @@ for (param_species in names(combined_all)) {
       max(loop_scatter_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
    loop_p_scatter_mass <- loop_p_scatter_mass +
     geom_vline(xintercept = BAR_THRESHOLD_MM,
-               linetype = "dashed", color = "firebrick",
+               linetype = "dashed", color = "black",
                linewidth = 0.5, alpha = 0.8)
   }
 
@@ -565,7 +565,7 @@ for (param_species in names(combined_all)) {
       max(loop_power_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
    loop_p_power_mass <- loop_p_power_mass +
     geom_hline(yintercept = BAR_THRESHOLD_MM,
-               linetype = "dashed", color = "firebrick",
+               linetype = "dashed", color = "black",
                linewidth = 0.5, alpha = 0.8)
   }
 
@@ -687,13 +687,40 @@ for (param_species in names(combined_all)) {
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
 # Build cross-species views using df_all (all species combined).
+# Only species meeting MIN_N_PER_SPECIES for the relevant variable pair are included.
 # Trend line behaviour on these plots is controlled by COMBINED_TREND_MODE
 # (set in QC Parameters above): "overall", "per_species", or "none".
+
+# ---- Qualified species vectors (reused across all combined plots) ----
+sp_qual_fl_width <- df_all %>%
+ dplyr::filter(!is.na(ForkLength_mm), !is.na(Width_mm)) %>%
+ dplyr::count(Species) %>%
+ dplyr::filter(n >= MIN_N_PER_SPECIES) %>%
+ dplyr::pull(Species)
+
+sp_qual_mass_width <- df_all %>%
+ dplyr::filter(!is.na(Mass_g), Mass_g > 0, !is.na(Width_mm), Width_mm > 0) %>%
+ dplyr::count(Species) %>%
+ dplyr::filter(n >= MIN_N_PER_SPECIES) %>%
+ dplyr::pull(Species)
+
+sp_qual_fl <- df_all %>%
+ dplyr::filter(!is.na(ForkLength_mm)) %>%
+ dplyr::count(Species) %>%
+ dplyr::filter(n >= MIN_N_PER_SPECIES) %>%
+ dplyr::pull(Species)
+
+cat("\n--- Multi-species plots ---\n")
+cat("  Qualified species (FL + Width):", paste(sp_qual_fl_width, collapse = ", "), "\n")
+cat("  Qualified species (Mass + Width):", paste(sp_qual_mass_width, collapse = ", "), "\n")
 
 #### Combined 1: Width ~ Fork Length (linear) ####----
 # Shows whether species share similar width-to-length slopes or diverge,
 # suggesting morphological differences relevant to gear selectivity or condition.
-df_combined_fl <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
+df_combined_fl <- df_all %>%
+ dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm),
+               Species %in% sp_qual_fl_width)
+
 plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
  geom_smooth(method = "lm", se = FALSE) +
@@ -704,7 +731,10 @@ plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm
 #### Combined 2: Width ~ Mass (log x-axis) ####----
 # Log-transforms mass to linearize the relationship; useful for comparing
 # how body width tracks mass gain across species of very different sizes.
-df_combined_mass_logx <- df_all %>% dplyr::filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0)
+df_combined_mass_logx <- df_all %>%
+ dplyr::filter(!is.na(Width_mm), !is.na(Mass_g), Mass_g > 0,
+               Species %in% sp_qual_mass_width)
+
 plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
  stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE) +
@@ -718,7 +748,8 @@ plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes
 # Trend controlled by COMBINED_TREND_MODE.
 df_combined_loglog_fl <- df_all %>%
  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
-               !is.na(ForkLength_mm), ForkLength_mm > 0)
+               !is.na(ForkLength_mm), ForkLength_mm > 0,
+               Species %in% sp_qual_fl_width)
 
 plots[["combined"]][["loglog_width_by_FL"]] <-
  ggplot(df_combined_loglog_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
@@ -731,14 +762,11 @@ plots[["combined"]][["loglog_width_by_FL"]] <-
  theme(legend.position = "bottom")
 
 if (COMBINED_TREND_MODE == "overall") {
- # One global trend line across all species
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
-  stat_smooth(method = "lm",
-              formula = y ~ x, se = FALSE,
-              mapping = aes(x = log(ForkLength_mm), y = log(Width_mm)),
+  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(x = ForkLength_mm, y = Width_mm),
               inherit.aes = FALSE, color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
- # One trend line per species (clearer when species differ strongly)
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
   geom_smooth(method = "lm", se = FALSE)
 } # else "none": scatter points only
@@ -749,7 +777,8 @@ if (COMBINED_TREND_MODE == "overall") {
 # Trend controlled by COMBINED_TREND_MODE.
 df_combined_power_mass <- df_all %>%
  dplyr::filter(!is.na(Width_mm), Width_mm > 0,
-               !is.na(Mass_g),   Mass_g > 0)
+               !is.na(Mass_g),   Mass_g > 0,
+               Species %in% sp_qual_mass_width)
 
 plots[["combined"]][["powerlaw_width_by_mass"]] <-
  ggplot(df_combined_power_mass, aes(Mass_g, Width_mm, color = Species)) +
@@ -763,9 +792,8 @@ plots[["combined"]][["powerlaw_width_by_mass"]] <-
 
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
-  stat_smooth(method = "lm",
-              formula = y ~ x, se = FALSE,
-              mapping = aes(x = log(Mass_g), y = log(Width_mm)),
+  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(x = Mass_g, y = Width_mm),
               inherit.aes = FALSE, color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
@@ -775,7 +803,8 @@ if (COMBINED_TREND_MODE == "overall") {
 #### Combined 5: Fork Length histograms faceted by species ####----
 # Side-by-side size structure comparison; y-axes are free (scales = "free_y")
 # so rare species are still legible alongside abundant ones.
-df_all_hist <- df_all %>% dplyr::filter(!is.na(ForkLength_mm))
+df_all_hist <- df_all %>%
+ dplyr::filter(!is.na(ForkLength_mm), Species %in% sp_qual_fl)
 plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkLength_mm)) +
  geom_histogram(color = "grey30", fill = "#9ecae1", alpha = 0.85,
                 binwidth = BIN_WIDTH_MM, boundary = 0) +
@@ -788,12 +817,38 @@ plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkL
  theme_minimal() +
  theme(legend.position = "none")
 
+#### Combined patchwork panel ####----
+# Layout: scatter pairs in rows 1-2, faceted histogram full-width in row 3.
+# Two-step assignment: & theme() applied before + plot_annotation() to prevent
+# the panel title from being stripped (same pattern as per-species patchwork).
+temp_combined_pw <-
+ (plots[["combined"]][["width_by_FL"]]        | plots[["combined"]][["loglog_width_by_FL"]]) /
+ (plots[["combined"]][["width_by_mass_logx"]] | plots[["combined"]][["powerlaw_width_by_mass"]]) &
+ ggplot2::theme(
+  plot.title      = ggplot2::element_text(size = 9, face = "plain"),
+  plot.caption    = ggplot2::element_blank(),
+  legend.position = "bottom"
+ )
+
+plots[["combined"]][["patchwork"]] <- temp_combined_pw +
+ patchwork::plot_layout(guides = "collect") +
+ patchwork::plot_annotation(
+  title      = "All species — morphology overview",
+  tag_levels = "a", tag_prefix = "(", tag_suffix = ")",
+  theme      = ggplot2::theme(
+   plot.title = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold")
+  )
+ )
+
+cat("Multi-species plots complete.\n")
+
 # Send all plots to the RStudio Plots/Viewer pane.
 # To view a single plot without printing all, use e.g.:
 #   plots[["Goldfish"]][["scatter_fl"]]
 #   plots[["combined"]][["hist_FL_by_species"]]
 #   print(plots)
-for (sp in names(combined_all)) print(plots[[sp]][["patchwork"]])
+for (sp in names(combined_all)) if (!is.null(plots[[sp]][["patchwork"]])) print(plots[[sp]][["patchwork"]])
+print(plots[["combined"]][["patchwork"]])
 
 ##### Species-level counts (raw vs filtered) ##################----
 # Helps diagnose if species are genuinely low-sample vs heavily filtered by NA/zero.
@@ -810,27 +865,41 @@ df_species_counts <- df_all %>%
 
 ##### Optional exports (kept commented) #######################----
 #-------------------------------------------------------------#
+
+# Per-species patchwork panel export — letter size (8.5 x 11 in), one file per species
+# Only saves species where a patchwork was successfully built (n >= MIN_N_PER_SPECIES).
+for (sp in names(combined_all)) {
+ if (!is.null(plots[[sp]][["patchwork"]])) {
+  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
+         plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
+ }
+}
+
+# Combined patchwork panel export
+ggsave(file.path(path_figs_dir, "combined_patchwork.png"),
+       plots[["combined"]][["patchwork"]], width = 12, height = 10, dpi = 300)
+
+# Combined (multi-species) individual plot exports
+ggsave(file.path(path_figs_dir, "combined_width_by_FL.png"),
+       plots[["combined"]][["width_by_FL"]],            width = 7, height = 5, dpi = 300)
+ggsave(file.path(path_figs_dir, "combined_width_by_mass_logx.png"),
+       plots[["combined"]][["width_by_mass_logx"]],     width = 7, height = 5, dpi = 300)
+ggsave(file.path(path_figs_dir, "combined_loglog_width_by_FL.png"),
+       plots[["combined"]][["loglog_width_by_FL"]],     width = 7, height = 5, dpi = 300)
+ggsave(file.path(path_figs_dir, "combined_powerlaw_width_by_mass.png"),
+       plots[["combined"]][["powerlaw_width_by_mass"]], width = 7, height = 5, dpi = 300)
+ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
+       plots[["combined"]][["hist_FL_by_species"]],     width = 9, height = 7, dpi = 300)
+
+# Table exports
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))
-# ggsave(file.path(path_figs_dir, "combined_width_by_FL.png"),        plots[["combined"]][["width_by_FL"]],        width = 7, height = 5, dpi = 300)
-# ggsave(file.path(path_figs_dir, "combined_width_by_mass_logx.png"), plots[["combined"]][["width_by_mass_logx"]], width = 7, height = 5, dpi = 300)
-# ggsave(file.path(path_figs_dir, "combined_loglog_width_by_FL.png"), plots[["combined"]][["loglog_width_by_FL"]], width = 7, height = 5, dpi = 300)
-# ggsave(file.path(path_figs_dir, "combined_powerlaw_width_by_mass.png"), plots[["combined"]][["powerlaw_width_by_mass"]], width = 7, height = 5, dpi = 300)
-# ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
-    # plots[["combined"]][["hist_FL_by_species"]], width = 9, height = 7, dpi = 300)
-# readr::write_csv(df_species_counts,  file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
-# readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))  # already present
-# readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))  # already present
+# readr::write_csv(df_species_counts,   file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 
- # Per-species plot export (compact, all individual plots)
+# Per-species individual plot export (one file per plot per species)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
-# ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
-# plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
-
-# Per-species patchwork panel export — letter size (8.5x11), all species at once
-# for (sp in names(combined_all))
-#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
-#         plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
+#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
+#         plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
 # Single-species patchwork export (swap species name as needed)
 # ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
