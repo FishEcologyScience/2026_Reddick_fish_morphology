@@ -29,10 +29,6 @@ path_singlefile <- file.path(
  "Fixed_fish_widths_DraftExcelAnalysis_Feb2026.xlsx"
 )
 
-# Output objects
-combined_all <- list()
-
-
 ##### Import Single Dataset ###################################----
 #-------------------------------------------------------------#
 

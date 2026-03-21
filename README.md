@@ -1,178 +1,142 @@
----
-editor_options: 
-  markdown: 
-    wrap: 72
+# Fish Morphology Characterization — Hamilton Harbour, Lake Ontario
+
+**Reddick, D., Rizzuto, M., Bzonek, P., Turner, K., Croft-White, M., Midwood, J.**
+
+This repository contains the R analysis code associated with a study characterizing gross fish morphology in Hamilton Harbour, Lake Ontario. Body width measurements (alongside fork length and mass) are analyzed across multiple species to inform the design and evaluation of structural invasive fish barriers, and to better understand how fence spacing affects fish passage.
+
 ---
 
-# R Project Template
+## Background
 
-A standardized template for organizing R data analysis projects with
-built-in Git LFS support for large files.
+Structural fish barriers are increasingly used as a management tool to limit the spread of invasive species. The effectiveness of barrier designs — particularly fence spacing — depends on the body dimensions of target species relative to non-target species. This analysis quantifies width-length and width-mass relationships across the fish community of Hamilton Harbour to provide empirical morphological data for barrier design and assessment.
+
+---
+
+## Getting Started
+
+### Requirements
+
+- R (≥ 4.1)
+- RStudio (recommended)
+- R packages: `tidyverse`, `patchwork`, `readxl`, `scales`
+
+### Running the analysis
+
+1. Open `2026_Reddick_fish_morphology.Rproj` in RStudio
+2. Open and run [`02_scripts/script00-00_user_interface.R`](02_scripts/script00-00_user_interface.R)
+
+That script sources the full pipeline in order. All outputs are written to `03_outputs/01_figures/<YYYY-mm-dd>/` (a dated subfolder created automatically on each run).
+
+---
 
 ## Repository Structure
 
 ```
-Project/
+2026_Reddick_fish_morphology/
 ├── 01_data/
-│   └── 01_large_files/            # Large datasets tracked via Git LFS
+│   ├── 01_raw_files/              # Input morphometric data and species lookup
+│   ├── 02_processed_files/        # Intermediate outputs (if generated)
+│   └── 03_large_files_LFS/        # Large files tracked via Git LFS
 ├── 02_scripts/
-│   └── 01_functions/              # Reusable R functions
+│   ├── 01_functions/              # Helper functions sourced by main scripts
+│   ├── 02_scripts_single_use/     # Supplemental one-off analyses
+│   ├── 03_scripts_old/            # Archived legacy scripts
+│   ├── script00-00_user_interface.R   # START HERE — runs the full pipeline
+│   ├── script00-01_load_packages.R    # Package loading and global settings
+│   ├── script01-01_import_format_singlefile.R  # Data import and cleaning
+│   └── script01-02_morphology_plots.R          # All plots and summary tables
 ├── 03_outputs/
-│   └── 01_figures/                # Generated plots and visualizations
-├── 04_notes/                      # Project documentation and guides
-├── .gitignore                     # Files excluded from version control
+│   ├── 01_figures/                # Generated plots (dated subfolders)
+│   └── 01_tables/                 # Summary statistics and model coefficients
+├── 04_notes/                      # Setup guides and documentation
+├── .gitignore
 ├── .gitattributes                 # Git LFS configuration
-└── README.md                      # This file
+└── README.md
 ```
 
-## Quick Start
+---
 
-### 1. Clone or Copy This Template
+## Analysis Pipeline
 
-``` bash
-# If using as a template for a new project
-git clone <this-repo-url> <your-project-name>
-cd <your-project-name>
+```
+script00-00_user_interface.R
+        │
+        ├── [1] script00-01_load_packages.R
+        │         Loads tidyverse, patchwork; sets global options
+        │
+        ├── [2] script01-01_import_format_singlefile.R
+        │         Reads morphometric Excel file → combined_all, df_all
+        │
+        └── [3] script01-02_morphology_plots.R
+                  Per-species plots (6 types) + patchwork panels
+                  Multi-species combined plots (5 types)
+                  Summary tables: df_combined_summary, df_combined_models
 ```
 
-### 2. Set Up Git LFS (One-Time Setup)
+---
 
-If you haven't installed Git LFS before:
+## Outputs
 
-``` bash
-# Install Git LFS (Windows - included with Git for Windows)
-git lfs version  # Verify installation
+### Per-species plots
+For each species with sufficient data (n ≥ 10), six plots are produced and assembled into a single patchwork panel:
 
-# Configure Git LFS on your machine (once per user)
-git lfs install
-```
+| Panel position | Plot | Description |
+|---|---|---|
+| (a) | Histogram | Fork length frequency distribution |
+| (b) | Mass ~ Fork Length | Power-law fit: Mass = a · FL^b |
+| (c) | Width ~ Fork Length | Linear fit: Width = slope · FL + intercept |
+| (d) | log(Width) ~ log(Fork Length) | Log-log allometric scaling |
+| (e) | Mass ~ Width | Power-law fit: Mass = a · Width^b |
+| (f) | Width ~ Mass^b | Log-log power law |
 
-**For detailed installation and troubleshooting**, see:
-[`04_notes/git_lfs_setup.md`](04_notes/git_lfs_setup.md)
+### Multi-species combined plots
+Five plots overlaying all species for direct comparison:
+- Width ~ Fork Length
+- Width ~ Mass (log x-axis)
+- log(Width) ~ log(Fork Length)
+- Width ~ Mass^b (log-log)
+- Fork Length histograms faceted by species
 
-### 3. Start Working
+### Summary tables
+- **`df_combined_summary`** — per-species n, mean, min, max for fork length, width, and mass
+- **`df_combined_models`** — power-law coefficients (a, b, R²) from Mass ~ Width fits
+- **`df_species_counts`** — raw vs. NA/zero-filtered sample sizes per species
 
--   Add data files to `01_data/` (large files go in
-    `01_large_files/`)
--   Create analysis scripts in `02_scripts/`
--   Store custom functions in `02_scripts/01_functions/`
--   Generated outputs automatically go to `03_outputs/`
+---
 
-## Directory Descriptions
+## Data
 
-### `01_data/`
+Input data are stored in `01_data/01_raw_files/`. The primary file is a consolidated Excel spreadsheet containing morphometric measurements for all species. Required columns:
 
-Store all input data files here: - **Raw data**: Original, unmodified
-datasets - **Processed data**: Cleaned or transformed datasets -
-**`01_large_files/`**: Large datasets automatically tracked via Git
-LFS
+| Column | Units | Description |
+|---|---|---|
+| `Species` | — | Species code |
+| `ForkLength_mm` | mm | Fork length |
+| `Width_mm` | mm | Maximum body width |
+| `Mass_g` | g | Wet mass |
 
-### `02_scripts/`
+---
 
-Analysis and processing scripts: - **Main scripts**: Numbered workflows
-(scriptXX-YY format) - **`01_functions/`**: Reusable functions
-sourced by multiple scripts - Organize scripts by dependency order using
-numbered prefixes
+## Supplemental Analyses
 
-### `03_outputs/`
+Scripts in `02_scripts/02_scripts_single_use/` contain additional analyses run independently of the main pipeline:
 
-Generated results and visualizations: - **`01_figures/`**: Plots,
-maps, and visualizations - **Tables**: Summary statistics and model
-outputs - **Reports**: Rendered R Markdown documents
+| Script | Purpose |
+|---|---|
+| `script01_02_elecfish_length_histograms_2012on.R` | Length-frequency distributions from electrofishing surveys (2012–present) |
+| `script01_03_gap_analysis_width.R` | Identifies sampling gaps in width measurements relative to the 50 mm threshold |
+| `script01_04_rlf_largemouth_bass_bonar_bins.R` | Relative length frequency analysis for Largemouth Bass (Bonar 2002 methodology) |
+| `script01_06_plot_height_length_width.R` | Height, length, and width morphology plots |
 
-*Note: Output files are gitignored by default to ensure reproducibility*
+---
 
-### `04_notes/`
+## Citation
 
-Project documentation and guides: - Analysis notes and decisions -
-Methodology documentation - Setup guides 
+A formal citation will be available upon publication. This repository will be archived on Zenodo. In the meantime, please contact the corresponding author for attribution guidance.
 
-## Git Configuration
-
-### What's Tracked
-
--   All R scripts (`.R`, `.Rmd`)
--   Data files in `01_data/` (via Git LFS for large files)
--   Project configuration files (`.Rproj`, `.gitignore`,
-    `.gitattributes`)
--   Documentation (`.md` files)
-
-### What's Ignored
-
-See `.gitignore` for complete list: - R session files (`.RData`,
-`.Rhistory`, `.Rproj.user/`) - Generated outputs (`.png`, `.pdf`,
-`.tiff`, etc.) - Temporary objects
-
-### Git LFS
-
-Files in `01_data/01_large_files/` are automatically tracked via Git
-LFS: - Prevents repository bloat from large datasets - Maintains version
-control for large files - Works transparently once configured
-
-**See [`04_notes/git_lfs_setup.md`](04_notes/git_lfs_setup.md)
-for complete setup instructions**
-
-## Coding Conventions
-
-This template follows standardized R coding practices for file naming,
-folder organization, and R object naming.
-
-### Naming Convention Overview
-
-**Files and Folders:**
-
--   Scripts: `scriptXX-YY_descriptive_name.R` (e.g.,
-    `script02-01_analysis_rf.R`)
--   Functions: `functionXX-YY_descriptive_name.R` (e.g.,
-    `function01-01_helper_functions.R`)
--   Folders: `XX_descriptive_name/` (e.g., `01_data/`, `02_scripts/`)
--   All lowercase with underscores
-
-**R Objects:**
-
--   Raw data: `data_*` (e.g., `data_habitat`)
--   Processed data: `df_*` (e.g., `df_habitat_clean`)
--   Parameters: `param_*` (e.g., `param_seed`)
--   Temporary: `temp_*` (e.g., `temp_filtered`)
-
-**See
-[`04_notes/naming_conventions.md`](04_notes/naming_conventions.md) for
-complete details.**
-
-## Workflow Recommendations
-
-### Script Organization
-
--   **script00-XX**: Setup (packages, functions, configuration)
--   **script01-XX**: Data import and formatting
--   **script02-XX**: Analysis workflows
--   **script03-XX**: Visualization and reporting
--   **script10-XX**: Special analyses or extensions
-
-### Master Control Script
-
-Use `script00-00_user_interface.R` to orchestrate your workflow:
-
--   Source package loading script
--   Load data objects
--   Execute analysis scripts in dependency order
--   Provide workflow documentation
-
-### Version Control
-
-1.  **Commit often** with descriptive messages
-2.  **Document changes** in script modification notes
-3.  **Use branches** for experimental analyses
+---
 
 ## Additional Documentation
 
--   [**Naming Conventions**](04_notes/naming_conventions.md): Complete
-    guide to file, folder, and object naming
--   [**Git LFS Setup**](04_notes/git_lfs_setup.md): Installation,
-    configuration, and troubleshooting
-
-### External Resources
-
--   [R for Data Science](https://r4ds.had.co.nz/)
--   [Git LFS Documentation](https://git-lfs.github.com/)
--   [Happy Git with R](https://happygitwithr.com/) 
+- [`04_notes/naming_conventions.md`](04_notes/naming_conventions.md) — file, folder, and R object naming standards
+- [`04_notes/git_lfs_setup.md`](04_notes/git_lfs_setup.md) — Git LFS installation and troubleshooting

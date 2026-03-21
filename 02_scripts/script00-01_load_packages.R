@@ -1,48 +1,47 @@
 ## --------------------------------------------------------------#
-## Script name: Script0-1_load_packages
+## Script name: script00-01_load_packages.R
 ##
-## Purpose of script: 
-##    Load general-purpose scripts used throughout project
-##    Rarely used/problematic packages may be loaded in specific scripts 
-##    custom telemetrytoolsFESL needs to be installed with devtools
+## Purpose:
+##    Load packages, source helper functions, and set global options.
+##    Only packages actively used by this project are loaded here.
+##    Rarely used or context-specific packages should be loaded with
+##    package::function() notation directly in the scripts that need them.
 ##
-## Author:  
+## Author: Paul Bzonek [Claude]
+## Date Created: 2026-03-20
 ##
-## Date Created: 
-##
-## --------------------------------------------------------------#  
-## Modification Notes:  
-##   
+## --------------------------------------------------------------#
+## Modification Notes:
+##   2026-03-20 — Removed ggmap, sf, FESLtelemetry (not used in morphology
+##                pipeline). Commented out devtools install (run manually
+##                during updates only). Removed theme_set() — theme is
+##                managed in script01-02_morphology_plots.R.
 ## --------------------------------------------------------------#
 
-###Basic packages on CRAN
-#----------------------------#
-library('tidyverse') #Basic organizing and plotting
-library('ggmap') #google basemaps
-library('sf') #handle shapefiles, projections, and distance calculations
-library('patchwork') #Add plots together
 
-###Packages off CRAN
-#----------------------------#
-###Lab package
-#Only need to install during updates
-devtools::install_github("FishEcologyScience/FESLtelemetry")
-library('FESLtelemetry')
-#library('telemetrytoolsFESL')
+##### CRAN packages ###########################################----
+library(tidyverse)   # core data wrangling and ggplot2
+library(patchwork)   # combine multiple ggplots into panels
+
+# Spatial packages — not needed for morphology pipeline; load if extending
+# library(ggmap)     # google basemaps
+# library(sf)        # shapefiles, projections, distance calculations
 
 
-###GLATOS package
-#remotes::install_github("jsta/glatos")
-#library('glatos')
+##### Lab packages ############################################----
+# Install manually during updates only — do NOT leave uncommented during
+# routine runs (slow network call on every source).
+# devtools::install_github("FishEcologyScience/FESLtelemetry")
+# library(FESLtelemetry)
 
-###Source functions
-#----------------------------#
+
+##### Helper functions ########################################----
 source("02_scripts/01_functions/function01-01_helper_functions.R")
 
-###Adjust Settings
-#----------------------------#
-theme_set(theme_classic()) #ggplot background
-options(scipen=999) #Drop scientific notation
-param_seed <- 1987 #Set seed for randomized analysis
 
-plots <- list() #Home for plots
+##### Global settings #########################################----
+options(scipen = 999)    # suppress scientific notation
+param_seed <- 1987       # random seed for any randomized steps
+
+# Note: ggplot theme is set in script01-02_morphology_plots.R to keep
+# theme configuration alongside the plotting code that uses it.
