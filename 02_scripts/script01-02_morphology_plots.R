@@ -77,6 +77,7 @@ plots[["combined"]] <- list()    # ensure multi-species plot container exists
 make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", text)
 
 
+
 ##### QC Parameters #############################################----
 #-------------------------------------------------------------#
 
@@ -133,6 +134,8 @@ ggplot2::theme_update(
  legend.title  = ggplot2::element_text(size = LEGEND_TITLE_SIZE),
  legend.text   = ggplot2::element_text(size = LEGEND_TEXT_SIZE)
 )
+
+
 
 ##### Species Loop ############################################----
 #-------------------------------------------------------------#
@@ -233,6 +236,7 @@ for (param_species in names(combined_all)) {
                                       " < ", MIN_N_PER_SPECIES, ") for Width~FL plot."), param_species))
  }
  plots[[param_species]][["scatter_fl"]] <- loop_p_scatter_fl
+
 
  #### Plot 2: Mass ~ Width (power-law, raw scale) ####----
  # Scatter with Mass on y, Width on x; fits W = a·X^b directly on the raw scale
@@ -353,6 +357,7 @@ for (param_species in names(combined_all)) {
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
  df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
 
+
  #### Plot 3: Mass ~ Fork Length (power-law, raw scale) ####----
  # Scatter with Mass on y, Fork Length on x; fits W = a·L^b on the raw scale.
  # Standard fisheries length-weight relationship plot.
@@ -449,6 +454,7 @@ for (param_species in names(combined_all)) {
  }
 
  plots[[param_species]][["FL_by_mass"]] <- loop_p_fl_mass
+
 
  #### Plot 4: log(Width) ~ log(Fork Length) (log-log axes) ####----
  # Both axes on log10 scale; linearizes the power-law relationship.
@@ -645,6 +651,8 @@ for (param_species in names(combined_all)) {
   plots[[param_species]][["hist_FL"]] <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_hist_df, "No fork length data available.", param_species))
  }
+
+
  #### Patchwork panel ####----
  # Assembled here while all 6 plot objects are in scope.
  # Only built if all regression plots had sufficient data (nrow >= MIN_N_PER_SPECIES).
@@ -682,6 +690,7 @@ for (param_species in names(combined_all)) {
 
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
+
 
 
 ##### Multi-species plots #####################################----
@@ -728,6 +737,7 @@ plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm
       x = "Fork Length (mm)", y = "Width (mm)") +
  theme(legend.position = "bottom")
 
+
 #### Combined 2: Width ~ Mass (log x-axis) ####----
 # Log-transforms mass to linearize the relationship; useful for comparing
 # how body width tracks mass gain across species of very different sizes.
@@ -741,6 +751,7 @@ plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes
  labs(title = "All species - Width by Mass (log x)",
       x = "Mass (g)", y = "Width (mm)") +
  theme(legend.position = "bottom")
+
 
 #### Combined 3: log(Width) ~ log(Fork Length) (log-log) ####----
 # Log-log plot linearizes the power-law; parallel lines = same scaling exponent,
@@ -771,6 +782,7 @@ if (COMBINED_TREND_MODE == "overall") {
   geom_smooth(method = "lm", se = FALSE)
 } # else "none": scatter points only
 
+
 #### Combined 4: Width ~ Mass^b (power-law, log-log) ####----
 # Visualizes allometric scaling of width with mass across species.
 # Steeper slopes indicate width grows faster relative to mass.
@@ -800,6 +812,7 @@ if (COMBINED_TREND_MODE == "overall") {
   geom_smooth(method = "lm", se = FALSE)
 } # else "none": no trend lines
 
+
 #### Combined 5: Fork Length histograms faceted by species ####----
 # Side-by-side size structure comparison; y-axes are free (scales = "free_y")
 # so rare species are still legible alongside abundant ones.
@@ -816,6 +829,7 @@ plots[["combined"]][["hist_FL_by_species"]] <- ggplot(df_all_hist, aes(x = ForkL
  facet_wrap(~ Species, scales = "free_y") +
  theme_minimal() +
  theme(legend.position = "none")
+
 
 #### Combined patchwork panel ####----
 # Layout: scatter pairs in rows 1-2, faceted histogram full-width in row 3.
@@ -850,6 +864,8 @@ cat("Multi-species plots complete.\n")
 for (sp in names(combined_all)) if (!is.null(plots[[sp]][["patchwork"]])) print(plots[[sp]][["patchwork"]])
 print(plots[["combined"]][["patchwork"]])
 
+
+
 ##### Species-level counts (raw vs filtered) ##################----
 # Helps diagnose if species are genuinely low-sample vs heavily filtered by NA/zero.
 df_species_counts <- df_all %>%
@@ -863,7 +879,8 @@ df_species_counts <- df_all %>%
  dplyr::arrange(n_all)
 
 
-##### Optional exports (kept commented) #######################----
+
+##### Exports #################################################----
 #-------------------------------------------------------------#
 
 # Per-species patchwork panel export — letter size (8.5 x 11 in), one file per species
@@ -905,12 +922,14 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
 # ggsave(file.path(path_figs_dir, "Rudd_patchwork.png"),     plots[["Rudd"]][["patchwork"]],     width = 8.5, height = 11, dpi = 300)
 
-##### Cleanup (remove temporary loop/temp objects) #############----
+
+
+##### Cleanup #################################################----
 #-------------------------------------------------------------#
-# Remove transient objects created inside the loop or as temp_* helpers.
-loop_temp_vars <- ls(pattern = "^(loop_|temp_)")
-if (length(loop_temp_vars)) {
- rm(list = loop_temp_vars)
-}
+# Remove transient objects: loop variables, temp helpers, and intermediate
+# objects from the multi-species section.
+loop_temp_vars <- ls(pattern = "^(loop_|temp_|sp_qual_)")
+if (length(loop_temp_vars)) rm(list = loop_temp_vars)
+rm(model_row, make_caption)
 
 cat("\nAll plots complete.\n")
