@@ -195,6 +195,7 @@ for (param_species in names(combined_all)) {
 
   # Fit requires at least 2 points
   if (nrow(loop_scatter_fl) >= 2) {
+   cat("  ", param_species, "- P1: lm fit (n =", nrow(loop_scatter_fl), ")\n")
    loop_lm_fl    <- lm(Width_mm ~ ForkLength_mm, data = loop_scatter_fl)
    loop_coef_fl  <- coef(loop_lm_fl)
    loop_r2_fl    <- summary(loop_lm_fl)$r.squared
@@ -225,7 +226,7 @@ for (param_species in names(combined_all)) {
                linewidth = 0.5, alpha = 0.8)
   }
  } else {
-  # Placeholder when insufficient data for a meaningful plot
+  cat("  ", param_species, "- P1: PLACEHOLDER (n =", nrow(loop_scatter_fl), "< MIN_N)\n")
   loop_p_scatter_fl <- ggplot() + theme_void() +
    labs(caption = make_caption(loop_scatter_fl,
                                paste0("Insufficient data (n = ", nrow(loop_scatter_fl),
@@ -285,7 +286,7 @@ for (param_species in names(combined_all)) {
   )
 
   if (!inherits(nls_fit, "try-error")) {
-   # nls success on raw scale
+   cat("  ", param_species, "- P2: nls_raw fit succeeded\n")
    a_hat <- unname(coef(nls_fit)["a"])
    b_hat <- unname(coef(nls_fit)["b"])
    y     <- loop_scatter_mass$Mass_g
@@ -295,44 +296,33 @@ for (param_species in names(combined_all)) {
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
 
   } else {
-   # Fallback: log–log with Duan’s smearing correction
-   lm_fit <- lm(log(Mass_g) ~ log(Width_mm), data = loop_scatter_mass)
-   b_hat  <- unname(coef(lm_fit)[2])
-   a_raw  <- exp(unname(coef(lm_fit)[1]))
-   smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing factor
-   a_hat  <- a_raw * smear
-
-   y     <- loop_scatter_mass$Mass_g
-   yhat  <- a_hat * (loop_scatter_mass$Width_mm ^ b_hat)
-   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-
-   fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
+   cat("  ", param_species, "- P2: nls failed — no fit\n")
   }
 
-  # ----- Prediction curve on original axes ---------------------------
-  x_rng_w <- range(loop_scatter_mass$Width_mm, na.rm = TRUE)
-  x_seq_w <- seq(x_rng_w[1], x_rng_w[2], length.out = 200)
+  # ----- Prediction curve and annotation (only if nls succeeded) -----
+  if (!is.na(fit_info$a)) {
+   x_rng_w <- range(loop_scatter_mass$Width_mm, na.rm = TRUE)
+   x_seq_w <- seq(x_rng_w[1], x_rng_w[2], length.out = 200)
 
-  pred_curve <- tibble(Width_mm = x_seq_w) |>
-   dplyr::mutate(Mass_pred = fit_info$a * (Width_mm ^ fit_info$b))
+   pred_curve <- tibble(Width_mm = x_seq_w) |>
+    dplyr::mutate(Mass_pred = fit_info$a * (Width_mm ^ fit_info$b))
 
-  loop_p_scatter_mass <- loop_p_scatter_mass +
-   geom_line(data = pred_curve, aes(x = Width_mm, y = Mass_pred),
-             color = "#cc4c02", linewidth = 1)
+   loop_p_scatter_mass <- loop_p_scatter_mass +
+    geom_line(data = pred_curve, aes(x = Width_mm, y = Mass_pred),
+              color = "#cc4c02", linewidth = 1)
 
-  # ----- Equation annotation (use generic X to avoid implying girth) --
-  a_lbl  <- formatC(fit_info$a, format = "e", digits = 2)  # 'a' often small; scientific notation
-  b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
-  r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
+   # 'a' often small; scientific notation
+   a_lbl  <- formatC(fit_info$a, format = "e", digits = 2)
+   b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
+   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
 
-  eq_label <- paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl)
-
-  loop_p_scatter_mass <- loop_p_scatter_mass +
-   annotate("text",
-            x = quantile(loop_scatter_mass$Width_mm, 0.05, na.rm = TRUE),
-            y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
-            label = eq_label,
-            hjust = 0, vjust = 1, size = 3.5)
+   loop_p_scatter_mass <- loop_p_scatter_mass +
+    annotate("text",
+             x = quantile(loop_scatter_mass$Width_mm, 0.05, na.rm = TRUE),
+             y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
+             label = paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl),
+             hjust = 0, vjust = 1, size = 3.5)
+  }
 
   if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
       max(loop_scatter_mass$Width_mm, na.rm = TRUE) >= BAR_THRESHOLD_MM) {
@@ -402,6 +392,7 @@ for (param_species in names(combined_all)) {
   )
 
   if (!inherits(nls_fit, "try-error")) {
+   cat("  ", param_species, "- P3: nls_raw fit succeeded\n")
    # Extract coefficients from nls
    coef_nls <- coef(nls_fit)
    a_hat    <- unname(coef_nls["a"])
@@ -415,49 +406,35 @@ for (param_species in names(combined_all)) {
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
 
   } else {
-   # ----- Fallback: log-log fit with Duan's smearing correction -----
-   # log(W) = log(a) + b log(L)  =>  W = a * L^b, with a corrected by smearing factor
-   lm_fit <- lm(log(Mass_g) ~ log(ForkLength_mm), data = loop_fl_mass)
-   b_hat  <- unname(coef(lm_fit)[2])
-   a_raw  <- exp(unname(coef(lm_fit)[1]))
-   smear  <- mean(exp(residuals(lm_fit)))   # Duan smearing
-   a_hat  <- a_raw * smear
-
-   # R^2 on raw scale using back-transformed fitted values
-   y     <- loop_fl_mass$Mass_g
-   yhat  <- a_hat * (loop_fl_mass$ForkLength_mm ^ b_hat)
-   r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
-
-   fit_info <- list(method = "loglm_smear", a = a_hat, b = b_hat, r2 = r2_ml)
+   cat("  ", param_species, "- P3: nls failed — no fit\n")
   }
 
-  # ----- Prediction curve on original axes ---------------------------
-  x_rng_fl <- range(loop_fl_mass$ForkLength_mm, na.rm = TRUE)
-  x_seq_fl <- seq(x_rng_fl[1], x_rng_fl[2], length.out = 200)
+  # ----- Prediction curve and annotation (only if nls succeeded) -----
+  if (!is.na(fit_info$a)) {
+   x_rng_fl <- range(loop_fl_mass$ForkLength_mm, na.rm = TRUE)
+   x_seq_fl <- seq(x_rng_fl[1], x_rng_fl[2], length.out = 200)
 
-  pred_curve <- tibble(ForkLength_mm = x_seq_fl) |>
-   dplyr::mutate(Mass_pred = fit_info$a * (ForkLength_mm ^ fit_info$b))
+   pred_curve <- tibble(ForkLength_mm = x_seq_fl) |>
+    dplyr::mutate(Mass_pred = fit_info$a * (ForkLength_mm ^ fit_info$b))
 
-  loop_p_fl_mass <- loop_p_fl_mass +
-   geom_line(data = pred_curve, aes(x = ForkLength_mm, y = Mass_pred),
-             color = "#bf5b17", linewidth = 1)
+   loop_p_fl_mass <- loop_p_fl_mass +
+    geom_line(data = pred_curve, aes(x = ForkLength_mm, y = Mass_pred),
+              color = "#bf5b17", linewidth = 1)
 
-  # ----- Equation annotation: W = a · L^b ----------------------------
-  # 'a' can be small; show in engineering/scientific format
-  a_lbl <- formatC(fit_info$a, format = "e", digits = 2)
-  b_lbl <- formatC(fit_info$b, format = "f", digits = 3)
-  r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
+   # 'a' can be small; show in engineering/scientific format
+   a_lbl  <- formatC(fit_info$a, format = "e", digits = 2)
+   b_lbl  <- formatC(fit_info$b, format = "f", digits = 3)
+   r2_lbl <- if (is.finite(fit_info$r2)) paste0("\nR^2 = ", formatC(fit_info$r2, format = "f", digits = 3)) else ""
 
-  eq_label <- paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl)
-
-  loop_p_fl_mass <- loop_p_fl_mass +
-   annotate(
-    "text",
-    x = quantile(loop_fl_mass$ForkLength_mm, 0.05, na.rm = TRUE),
-    y = quantile(loop_fl_mass$Mass_g,        0.95, na.rm = TRUE),
-    label = eq_label,
-    hjust = 0, vjust = 1, size = 3.5
-   )
+   loop_p_fl_mass <- loop_p_fl_mass +
+    annotate(
+     "text",
+     x = quantile(loop_fl_mass$ForkLength_mm, 0.05, na.rm = TRUE),
+     y = quantile(loop_fl_mass$Mass_g,        0.95, na.rm = TRUE),
+     label = paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl),
+     hjust = 0, vjust = 1, size = 3.5
+    )
+  }
 
  } else {
   loop_p_fl_mass <- ggplot() + theme_void() +
@@ -496,6 +473,7 @@ for (param_species in names(combined_all)) {
    )
 
   if (nrow(loop_loglog_fl) >= 3) {
+   cat("  ", param_species, "- P4: lm fit (n =", nrow(loop_loglog_fl), ")\n")
    loop_fit_ll   <- lm(log(Width_mm) ~ log(ForkLength_mm), data = loop_loglog_fl)
    loop_coefs_ll <- coef(loop_fit_ll)
    loop_r2_ll    <- summary(loop_fit_ll)$r.squared
@@ -556,6 +534,7 @@ for (param_species in names(combined_all)) {
    )
 
   if (nrow(loop_power_mass) >= 3) {
+   cat("  ", param_species, "- P5: lm fit (n =", nrow(loop_power_mass), ")\n")
    loop_fit_pw   <- lm(log(Width_mm) ~ log(Mass_g), data = loop_power_mass)
    loop_coefs_pw <- coef(loop_fit_pw)
    loop_r2_pw    <- summary(loop_fit_pw)$r.squared
@@ -849,9 +828,9 @@ df_species_counts <- df_all %>%
 # plots[[sp]][[nm]], width = 7, height = 5, dpi = 300)
 
 # Per-species patchwork panel export — letter size (8.5x11), all species at once
-for (sp in names(combined_all))
- ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
-        plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
+# for (sp in names(combined_all))
+#  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_patchwork.png")),
+#         plots[[sp]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
 
 # Single-species patchwork export (swap species name as needed)
 # ggsave(file.path(path_figs_dir, "Goldfish_patchwork.png"), plots[["Goldfish"]][["patchwork"]], width = 8.5, height = 11, dpi = 300)
