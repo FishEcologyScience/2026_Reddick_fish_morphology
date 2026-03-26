@@ -806,7 +806,24 @@ for (param_species in names(combined_all)) {
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
 
+# ---- Tidy model results table (no repeated species / n) ----
 
+df_model_equations <- df_model_equations |>
+ dplyr::group_by(`Species name`) |>
+ dplyr::mutate(
+  n = dplyr::if_else(dplyr::row_number() == 1, n, NA_integer_),
+  `Species name` = dplyr::if_else(dplyr::row_number() == 1, `Species name`, "")
+ ) |>
+ dplyr::ungroup()
+
+# ---- Round numeric columns for TABLE DISPLAY ONLY (safe for small values) ----
+
+df_model_equations <- df_model_equations |>
+ dplyr::mutate(
+  intercept_a = formatC(intercept_a, format = "fg", digits = 4),
+  slope_b     = formatC(slope_b,     format = "fg", digits = 4),
+  `R^2`       = formatC(`R^2`,        format = "fg", digits = 4)
+ )
 
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
@@ -847,7 +864,7 @@ df_combined_fl <- df_all %>%
 
 plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- geom_smooth(method = "lm", se = FALSE) +
+ geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
  labs(title = "Width by Fork Length (linear)",
       x = "Fork Length (mm)", y = "Width (mm)") +
  theme(legend.position = "bottom")
@@ -862,7 +879,7 @@ df_combined_mass_logx <- df_all %>%
 
 plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE) +
+ stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE, show.legend = FALSE) +
  labs(title = "Width by Mass (log x)",
       x = "Mass (g)", y = "Width (mm)") +
  theme(legend.position = "bottom")
@@ -1028,10 +1045,12 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # readr::write_csv(df_combined_summary, file.path(path_tables_dir, "_combined_summary_by_species.csv"))
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))
 # readr::write_csv(df_species_counts,   file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
-writexl::write_xlsx(
- df_model_equations,
- file.path(path_tables_dir, "morphology_model_results.xlsx")
-)
+
+# Results table export
+# writexl::write_xlsx(
+# df_model_equations,
+# file.path(path_tables_dir, "morphology_model_results.xlsx")
+# )
 
 # Per-species individual plot export (one file per plot per species)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
