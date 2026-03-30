@@ -71,8 +71,7 @@ df_combined_summary <- tibble()
 df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) model
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
-df_model_equations <- tibble()   # Collect per-species model coefficients and equations
- 
+
 # Helper to standardize plot captions per species
 make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", text)
 
@@ -227,24 +226,6 @@ for (param_species in names(combined_all)) {
    
    loop_slope_fl <- unname(loop_coef_fl[["ForkLength_mm"]])  # slope
    loop_int_fl   <- unname(loop_coef_fl[["(Intercept)"]])    # intercept
-
-   df_model_equations <- dplyr::bind_rows(
-    df_model_equations,
-    tibble::tibble(
-     `Species name` = species_common_name,
-     Relationship   = "Width ~ Fork Length",
-     n              = nrow(loop_scatter_fl),
-     intercept_a    = loop_int_fl,
-     slope_b        = loop_slope_fl,
-     `R^2`          = loop_r2_fl,
-     Equation       = paste0(
-      "Width = ",
-      sprintf("%.4f", loop_slope_fl),
-      " · FL + ",
-      sprintf("%.4f", loop_int_fl)
-     )
-    )
-   )
    
    loop_eq_fl <- paste0(
     "Width = ", formatC(loop_slope_fl, format = "f", digits = 2),
@@ -340,23 +321,6 @@ for (param_species in names(combined_all)) {
 
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
    
-   df_model_equations <- dplyr::bind_rows(
-    df_model_equations,
-    tibble::tibble(
-     `Species name` = species_common_name,
-     Relationship   = "Mass ~ Width",
-     n              = nrow(loop_scatter_mass),
-     intercept_a    = fit_info$a,
-     slope_b        = fit_info$b,
-     `R^2`          = fit_info$r2,
-     Equation       = paste0(
-      "Mass = ",
-      sprintf("%.2e", fit_info$a),
-      " · Width^",
-      sprintf("%.4f", fit_info$b)
-     )
-    )
-   )
 
   } else {
    cat("  ", param_species, "- P2: nls failed — no fit\n")
@@ -468,24 +432,7 @@ for (param_species in names(combined_all)) {
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
 
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
-   
-   df_model_equations <- dplyr::bind_rows(
-    df_model_equations,
-    tibble::tibble(
-     `Species name` = species_common_name,
-     Relationship   = "Mass ~ Fork Length",
-     n              = nrow(loop_fl_mass),
-     intercept_a    = a_hat,
-     slope_b        = b_hat,
-     `R^2`          = r2_ml,
-     Equation       = paste0(
-      "Mass = ",
-      sprintf("%.2e", a_hat),
-      " · FL^",
-      sprintf("%.4f", b_hat)
-     )
-    )
-   )
+  
 
   } else {
    cat("  ", param_species, "- P3: nls failed — no fit\n")
@@ -564,23 +511,6 @@ for (param_species in names(combined_all)) {
    loop_slope_ll <- unname(loop_coefs_ll[["log(ForkLength_mm)"]])  # slope in log space
    loop_int_ll   <- unname(loop_coefs_ll[["(Intercept)"]])
    
-   df_model_equations <- dplyr::bind_rows(
-    df_model_equations,
-    tibble::tibble(
-     `Species name` = species_common_name,
-     Relationship   = "log(Width) ~ log(Fork Length)",
-     n              = nrow(loop_loglog_fl),
-     intercept_a    = exp(loop_int_ll),
-     slope_b        = loop_slope_ll,
-     `R^2`          = loop_r2_ll,
-     Equation       = paste0(
-      "Width = ",
-      sprintf("%.4f", exp(loop_int_ll)),
-      " · FL^",
-      sprintf("%.4f", loop_slope_ll)
-     )
-    )
-   )
 
    # Predict on original scale across observed ForkLength range
    loop_rng_x_fl <- range(loop_loglog_fl$ForkLength_mm, na.rm = TRUE)
@@ -645,23 +575,6 @@ for (param_species in names(combined_all)) {
    loop_log_a_pw <- unname(loop_coefs_pw[["(Intercept)"]])
    loop_a_pw     <- exp(loop_log_a_pw)  # coefficient a
    
-   df_model_equations <- dplyr::bind_rows(
-    df_model_equations,
-    tibble::tibble(
-     `Species name` = species_common_name,
-     Relationship   = "Width ~ Mass^b",
-     n              = nrow(loop_power_mass),
-     intercept_a    = loop_a_pw,
-     slope_b        = loop_b_pw,
-     `R^2`          = loop_r2_pw,
-     Equation       = paste0(
-      "Width = ",
-      sprintf("%.4f", loop_a_pw),
-      " · Mass^",
-      sprintf("%.4f", loop_b_pw)
-     )
-    )
-   )
 
    # Predict on original scale across observed Mass range
    loop_rng_x_mass <- range(loop_power_mass$Mass_g, na.rm = TRUE)
@@ -783,10 +696,16 @@ for (param_species in names(combined_all)) {
    (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
    (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) &
    ggplot2::theme(
-    plot.title   = ggplot2::element_text(size = 9, face = "plain"),  # short sub-plot titles
-    plot.caption = ggplot2::element_blank()                          # redundant at panel level
+    plot.title   = ggplot2::element_text(size = 9, face = "plain"),
+    plot.caption = ggplot2::element_blank(),
+    
+    # shrink axes ONLY for patchwork subplots
+    axis.title.x = ggplot2::element_text(size = 9),
+    axis.title.y = ggplot2::element_text(size = 9),
+    axis.text.x  = ggplot2::element_text(size = 7),
+    axis.text.y  = ggplot2::element_text(size = 7)
    )
-
+  
   # Step 2: add panel-level title, letter tags (a)-(f), and histogram caption footer.
   plots[[param_species]][["patchwork"]] <- loop_pw +
    patchwork::plot_annotation(
@@ -806,24 +725,6 @@ for (param_species in names(combined_all)) {
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
 
-# ---- Tidy model results table (no repeated species / n) ----
-
-df_model_equations <- df_model_equations |>
- dplyr::group_by(`Species name`) |>
- dplyr::mutate(
-  n = dplyr::if_else(dplyr::row_number() == 1, n, NA_integer_),
-  `Species name` = dplyr::if_else(dplyr::row_number() == 1, `Species name`, "")
- ) |>
- dplyr::ungroup()
-
-# ---- Round numeric columns for TABLE DISPLAY ONLY (safe for small values) ----
-
-df_model_equations <- df_model_equations |>
- dplyr::mutate(
-  intercept_a = formatC(intercept_a, format = "fg", digits = 4),
-  slope_b     = formatC(slope_b,     format = "fg", digits = 4),
-  `R^2`       = formatC(`R^2`,        format = "fg", digits = 4)
- )
 
 ##### Multi-species plots #####################################----
 #-------------------------------------------------------------#
@@ -1046,11 +947,6 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))
 # readr::write_csv(df_species_counts,   file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 
-# Results table export
-# writexl::write_xlsx(
-# df_model_equations,
-# file.path(path_tables_dir, "morphology_model_results.xlsx")
-# )
 
 # Per-species individual plot export (one file per plot per species)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
