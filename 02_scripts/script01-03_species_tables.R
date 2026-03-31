@@ -31,18 +31,22 @@
 ##        - Per-species fitted morphology model results:
 ##          model type, coefficients, R², and equation form
 ##
+## --------------------------------------------------------------#
 
 
 ##### Setup ##########################################----
 #-------------------------------------------------------------#
+# This script assumes a completed import/cleaning step.
+# The object `combined_all` should already exist in the
+# global environment as a named list of cleaned data frames,
+# one per species.
 
-# Require cleaned object from the import script
-# - combined_all : named list of cleaned data frames by species
 if (!exists("combined_all")) {
  stop("ERROR: `combined_all` not found. Run script01-01_import_format_singlefile.R first.")
 }
 
-# Output directory (relative to working directory)
+# Tables are written to a fixed output directory so results
+# remain consistent across runs and scripts.
 path_tables_dir <- file.path("03_outputs", "01_tables")
 if (!dir.exists(path_tables_dir)) {
  dir.create(path_tables_dir, recursive = TRUE, showWarnings = FALSE)
@@ -51,6 +55,9 @@ if (!dir.exists(path_tables_dir)) {
 
 ##### Species name lookup #####################################----
 #-------------------------------------------------------------#
+# Load the lookup table used to convert internal species
+# identifiers (short codes) into human-readable names
+# for final reporting outputs.
 
 species_lookup_path <- file.path(
  "01_data", "01_raw_files", "species_lookup.xlsx"
@@ -69,16 +76,20 @@ species_lookup <- readxl::read_excel(species_lookup_path) |>
 
 ##### Species-level summary table #############################----
 #-------------------------------------------------------------#
-# Per species:
-#   - n (count of non-missing fork lengths)
-#   - fork length min / max
-#   - mean fork length
-#   - mean width
+# Builds a compact per-species descriptive statistics table.
+#
+# This section:
+#   - Iterates once over each species data frame
+#   - Computes basic size statistics directly from cleaned data
+#   - Does NOT apply minimum-n filters (summary only)
+#
+# This table is intended for reporting, QA/QC, and overview use.
 
 df_species_summary <- purrr::imap_dfr(
  combined_all,
  function(df_clean, param_species) {
   
+  # Guard against blank or placeholder species
   sp_key <- tolower(trimws(param_species))
   if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) {
    return(NULL)
@@ -86,15 +97,20 @@ df_species_summary <- purrr::imap_dfr(
   
   tibble::tibble(
    species_short = param_species,
+   
+   # Count based on fork length availability (primary size metric)
    n             = sum(!is.na(df_clean$ForkLength_mm)),
+   
+   # Range calculations are guarded to avoid Inf when all values are NA
    FL_min_mm     = if (all(is.na(df_clean$ForkLength_mm))) NA_real_
    else suppressWarnings(min(df_clean$ForkLength_mm, na.rm = TRUE)),
    FL_max_mm     = if (all(is.na(df_clean$ForkLength_mm))) NA_real_
    else suppressWarnings(max(df_clean$ForkLength_mm, na.rm = TRUE)),
-   FL_mean_mm    = mean(df_clean$ForkLength_mm, na.rm = TRUE),
-   Width_mean_mm = mean(df_clean$Width_mm, na.rm = TRUE),
    
-   # Measure of error 
+   FL_mean_mm    = mean(df_clean$ForkLength_mm, na.rm = TRUE),
+   Width_mean_mm = mean(df_clean$Width_mm,      na.rm = TRUE),
+   
+   # Width SD retained as a simple indication of spread/variability
    Width_sd_mm   = stats::sd(df_clean$Width_mm, na.rm = TRUE)
   )
  }
@@ -103,8 +119,16 @@ df_species_summary <- purrr::imap_dfr(
 
 ##### Species-level morphology model results ##################----
 #-------------------------------------------------------------#
-# Stores fitted model coefficients, R² values, and equation
-# forms for each species and relationship.
+# Fits morphology relationships at the species level and compiles
+# results into a single long-format table.
+#
+# Key design choices:
+#   - All models use the same minimum sample size threshold
+#   - Failed fits are silently skipped (no placeholder rows)
+#   - R² is always calculated on the scale of the response variable
+#
+# This table complements the plotting script by providing
+# exact numeric results in exportable form.
 
 MIN_N_PER_SPECIES <- 10
 
@@ -114,15 +138,21 @@ for (param_species in names(combined_all)) {
  
  df_clean <- combined_all[[param_species]]
  
+ # Skip invalid species identifiers early
  sp_key <- tolower(trimws(param_species))
  if (is.na(param_species) || sp_key %in% c("", "unknown", "unknown_species")) next
  
- # ---- Width ~ Fork Length (linear) ----
+ 
+ ### Width ~ Fork Length ######################################
+ # Linear fit is used here as a shape diagnostic.
+ # Filtering is limited to the variables involved in the model
+ # to maximize usable sample size.
+ 
  df_w_fl <- df_clean |>
   dplyr::filter(!is.na(Width_mm), !is.na(ForkLength_mm))
  
  if (nrow(df_w_fl) >= MIN_N_PER_SPECIES) {
-  fit <- lm(Width_mm ~ ForkLength_mm, data = df_w_fl)
+  fit   <- lm(Width_mm ~ ForkLength_mm, data = df_w_fl)
   coefs <- coef(fit)
   
   df_model_results <- dplyr::bind_rows(
@@ -144,7 +174,12 @@ for (param_species in names(combined_all)) {
   )
  }
  
- # ---- Mass ~ Width (power-law, raw scale via nls) ----
+ 
+ ### Mass ~ Width #############################################
+ # Uses nonlinear least squares on the original measurement scale.
+ # A preliminary log–log fit is used *only* to obtain stable
+ # starting values for the nonlinear solver.
+ 
  df_m_w <- df_clean |>
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g   > 0)
@@ -167,6 +202,7 @@ for (param_species in names(combined_all)) {
    a <- coef(nls_fit)["a"]
    b <- coef(nls_fit)["b"]
    
+   # Pseudo-R² on the response scale
    y    <- df_m_w$Mass_g
    yhat <- fitted(nls_fit)
    r2   <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
@@ -191,7 +227,12 @@ for (param_species in names(combined_all)) {
   }
  }
  
- # ---- Mass ~ Fork Length (power-law, raw scale via nls) ----
+ 
+ ### Mass ~ Fork Length #######################################
+ # Same fitting strategy as Mass ~ Width, but using length
+ # as the predictor. Kept separate to allow direct comparison
+ # of model behavior between morphometrics.
+ 
  df_m_fl <- df_clean |>
   dplyr::filter(!is.na(ForkLength_mm), ForkLength_mm > 0,
                 !is.na(Mass_g),       Mass_g       > 0)
@@ -238,13 +279,17 @@ for (param_species in names(combined_all)) {
   }
  }
  
- # ---- log(Width) ~ log(Fork Length) ----
+ 
+ ### log(Width) ~ log(Fork Length) ############################
+ # Performed to mirror the log–log diagnostic plots and
+ # provide a directly comparable scaling exponent in tabular form.
+ 
  df_ll <- df_clean |>
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(ForkLength_mm), ForkLength_mm > 0)
  
  if (nrow(df_ll) >= MIN_N_PER_SPECIES) {
-  fit <- lm(log(Width_mm) ~ log(ForkLength_mm), data = df_ll)
+  fit   <- lm(log(Width_mm) ~ log(ForkLength_mm), data = df_ll)
   coefs <- coef(fit)
   
   df_model_results <- dplyr::bind_rows(
@@ -266,13 +311,18 @@ for (param_species in names(combined_all)) {
   )
  }
  
- # ---- Width ~ Mass^b (log-log) ----
+ 
+ ### Width ~ Mass^b ###########################################
+ # Mirrors the final power-law plot where mass is the driver
+ # and width is the response. Fit is performed in log space
+ # to prioritize interpretation over prediction.
+ 
  df_pw <- df_clean |>
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g   > 0)
  
  if (nrow(df_pw) >= MIN_N_PER_SPECIES) {
-  fit <- lm(log(Width_mm) ~ log(Mass_g), data = df_pw)
+  fit   <- lm(log(Width_mm) ~ log(Mass_g), data = df_pw)
   coefs <- coef(fit)
   
   df_model_results <- dplyr::bind_rows(
@@ -295,7 +345,12 @@ for (param_species in names(combined_all)) {
  }
 }
 
-# ---- Resolve species codes to common names (legacy behavior) ----
+
+##### Resolve species codes ###################################
+#-------------------------------------------------------------#
+# Replace short-form species identifiers with common names
+# where available for final export tables.
+
 df_model_results <- df_model_results |>
  dplyr::left_join(
   species_lookup |>
@@ -310,6 +365,7 @@ df_model_results <- df_model_results |>
   )
  ) |>
  dplyr::select(-common_name)
+
 
 ##### Formatting and name resolution ##########################----
 #-------------------------------------------------------------#
@@ -333,7 +389,7 @@ df_species_summary <- df_species_summary |>
  ) |>
  dplyr::select(
   `Species`                = common_name,
-  `n`                      = n,
+  `n`,
   `Fork length range (mm)`,
   `Mean fork length (mm)`  = FL_mean_mm,
   `Mean width (mm)`        = Width_mean_mm,
@@ -358,6 +414,7 @@ output_path <- file.path(
 writexl::write_xlsx(df_species_summary, output_path)
 
 cat("Excel table written to:\n", output_path, "\n")
+
 
 ##### Export model results table ##############################----
 #-------------------------------------------------------------#
