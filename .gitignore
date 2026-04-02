@@ -29,3 +29,8 @@
 01_data/04_gitignore_files/
 rsconnect/
 CLAUDE.md
+
+
+#####IDE Folders #################################################----
+# Visual Studio Code metadata
+.vs/

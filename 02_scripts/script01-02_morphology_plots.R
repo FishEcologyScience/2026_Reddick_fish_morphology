@@ -68,15 +68,27 @@ if (!dir.exists(path_tables_dir)) dir.create(path_tables_dir, recursive = TRUE, 
 
 # Initialize containers for results and plots
 df_combined_summary <- tibble()
-df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) model
+df_combined_models  <- tibble()  # collects per-species model coefficients (all 5 relationships)
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
-
 
 # Helper to standardize plot captions per species
 make_caption <- function(df, text, sp) paste0(sp, " (n = ", nrow(df), "): ", text)
 
+# ---- Species name lookup  ----------------------------------#
+species_lookup_path <- file.path(
+ "01_data", "01_raw_files", "species_lookup.xlsx"
+)
 
+species_lookup <- readxl::read_excel(species_lookup_path) |>
+ dplyr::rename(
+  short_form  = `Short Form`,
+  common_name = `Common Name`
+ ) |>
+ dplyr::mutate(
+  short_form  = as.character(short_form),
+  common_name = as.character(common_name)
+ )
 
 ##### QC Parameters #############################################----
 #-------------------------------------------------------------#
@@ -148,6 +160,15 @@ for (param_species in names(combined_all)) {
 
  cat("\n--- Plotting:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "---\n")
  df_clean <- combined_all[[param_species]]
+ 
+ # Resolve common species name for patchwork titles
+ species_common_name <- species_lookup |>
+  dplyr::filter(short_form == param_species) |>
+  dplyr::pull(common_name)
+ 
+ if (length(species_common_name) == 0 || is.na(species_common_name)) {
+  species_common_name <- param_species
+ }
 
  # Skip unknown/blank/NA species names (do not plot/export them)
  sp_key <- tolower(trimws(param_species))
@@ -190,7 +211,7 @@ for (param_species in names(combined_all)) {
   loop_p_scatter_fl <- ggplot(loop_scatter_fl, aes(ForkLength_mm, Width_mm)) +
    geom_point(color = "#2c7fb8", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(param_species, " - Width by Fork Length"),
+    title   = "Width by Fork Length",
     x       = "Fork Length (mm)",
     y       = "Width (mm)",
     caption = make_caption(loop_scatter_fl, "Width vs fork length.", param_species)
@@ -202,9 +223,10 @@ for (param_species in names(combined_all)) {
    loop_lm_fl    <- lm(Width_mm ~ ForkLength_mm, data = loop_scatter_fl)
    loop_coef_fl  <- coef(loop_lm_fl)
    loop_r2_fl    <- summary(loop_lm_fl)$r.squared
+   
    loop_slope_fl <- unname(loop_coef_fl[["ForkLength_mm"]])  # slope
    loop_int_fl   <- unname(loop_coef_fl[["(Intercept)"]])    # intercept
-
+   
    loop_eq_fl <- paste0(
     "Width = ", formatC(loop_slope_fl, format = "f", digits = 2),
     " · FL ", ifelse(loop_int_fl >= 0, "+ ", "- "),
@@ -218,6 +240,17 @@ for (param_species in names(combined_all)) {
              x = quantile(loop_scatter_fl$ForkLength_mm, 0.05, na.rm = TRUE),
              y = quantile(loop_scatter_fl$Width_mm,      0.95, na.rm = TRUE),
              label = loop_eq_fl, hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Width ~ Fork Length",
+    n              = nrow(loop_scatter_fl),
+    intercept_a    = loop_int_fl,
+    slope_b        = loop_slope_fl,
+    `R^2`          = loop_r2_fl,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", loop_slope_fl), " · FL + ", sprintf("%.4f", loop_int_fl)
+    )
+   ))
   }
 
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm ----
@@ -250,23 +283,13 @@ for (param_species in names(combined_all)) {
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g   > 0)
 
- # Prepare a model-row so we can append even if we don't fit
- model_row <- tibble(
-  species = param_species,
-  n_used  = nrow(loop_scatter_mass),
-  a       = NA_real_,
-  b       = NA_real_,
-  r2      = NA_real_,
-  method  = NA_character_
- )
-
  if (nrow(loop_scatter_mass) >= MIN_N_PER_SPECIES) {
 
   # Base scatter (Mass vs Width)
   loop_p_scatter_mass <- ggplot(loop_scatter_mass, aes(x = Width_mm, y = Mass_g)) +
    geom_point(color = "#f16913", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(param_species, " - Mass by Width "),
+    title   = "Mass by Width ",
     x       = "Width (mm)",
     y       = "Mass (g)",
     caption = make_caption(loop_scatter_mass, "Mass vs width with power-law fit; X = Width_mm.", param_species)
@@ -298,6 +321,7 @@ for (param_species in names(combined_all)) {
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
 
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
+   
 
   } else {
    cat("  ", param_species, "- P2: nls failed — no fit\n")
@@ -326,6 +350,17 @@ for (param_species in names(combined_all)) {
              y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
              label = paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Mass ~ Width",
+    n              = nrow(loop_scatter_mass),
+    intercept_a    = fit_info$a,
+    slope_b        = fit_info$b,
+    `R^2`          = fit_info$r2,
+    Equation       = paste0(
+     "Mass = ", sprintf("%.2e", fit_info$a), " · Width^", sprintf("%.4f", fit_info$b)
+    )
+   ))
   }
 
   if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
@@ -355,7 +390,6 @@ for (param_species in names(combined_all)) {
  }
 
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
- df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
 
 
  #### Plot 3: Mass ~ Fork Length (power-law, raw scale) ####----
@@ -373,7 +407,7 @@ for (param_species in names(combined_all)) {
   loop_p_fl_mass <- ggplot(loop_fl_mass, aes(x = ForkLength_mm, y = Mass_g)) +
    geom_point(color = "#d95f02", alpha = 0.6, size = 2) +
    labs(
-    title   = paste0(param_species, " - Mass by Fork Length "),
+    title   = "Mass by Fork Length ",
     x       = "Fork Length (mm)",
     y       = "Mass (g)",
     caption = make_caption(loop_fl_mass, "Mass vs fork length with power-law fit (W = a·L^b).", param_species)
@@ -409,6 +443,7 @@ for (param_species in names(combined_all)) {
    r2_ml <- 1 - sum((y - yhat)^2) / sum((y - mean(y))^2)
 
    fit_info <- list(method = "nls_raw", a = a_hat, b = b_hat, r2 = r2_ml)
+  
 
   } else {
    cat("  ", param_species, "- P3: nls failed — no fit\n")
@@ -439,6 +474,17 @@ for (param_species in names(combined_all)) {
      label = paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl),
      hjust = 0, vjust = 1, size = 3.5
     )
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Mass ~ Fork Length",
+    n              = nrow(loop_fl_mass),
+    intercept_a    = fit_info$a,
+    slope_b        = fit_info$b,
+    `R^2`          = fit_info$r2,
+    Equation       = paste0(
+     "Mass = ", sprintf("%.2e", fit_info$a), " · FL^", sprintf("%.4f", fit_info$b)
+    )
+   ))
   }
 
  } else {
@@ -472,7 +518,7 @@ for (param_species in names(combined_all)) {
    scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
    annotation_logticks(sides = "bl") +
    labs(
-    title   = paste0(param_species, " - log(Width) ~ log(Fork Length)"),
+    title   = "log(Width) ~ log(Fork Length)",
     x       = "Fork Length (mm, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_loglog_fl, "log(Width) vs log(ForkLength).", param_species)
@@ -483,8 +529,10 @@ for (param_species in names(combined_all)) {
    loop_fit_ll   <- lm(log(Width_mm) ~ log(ForkLength_mm), data = loop_loglog_fl)
    loop_coefs_ll <- coef(loop_fit_ll)
    loop_r2_ll    <- summary(loop_fit_ll)$r.squared
+   
    loop_slope_ll <- unname(loop_coefs_ll[["log(ForkLength_mm)"]])  # slope in log space
    loop_int_ll   <- unname(loop_coefs_ll[["(Intercept)"]])
+   
 
    # Predict on original scale across observed ForkLength range
    loop_rng_x_fl <- range(loop_loglog_fl$ForkLength_mm, na.rm = TRUE)
@@ -503,6 +551,17 @@ for (param_species in names(combined_all)) {
                             "\nslope = ", formatC(loop_slope_ll, format = "f", digits = 3),
                             "  R^2 = ", formatC(loop_r2_ll, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "log(Width) ~ log(Fork Length)",
+    n              = nrow(loop_loglog_fl),
+    intercept_a    = exp(loop_int_ll),
+    slope_b        = loop_slope_ll,
+    `R^2`          = loop_r2_ll,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", exp(loop_int_ll)), " · FL^", sprintf("%.4f", loop_slope_ll)
+    )
+   ))
   }
  } else {
   loop_p_loglog_fl <- ggplot() + theme_void() +
@@ -533,7 +592,7 @@ for (param_species in names(combined_all)) {
    scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
    annotation_logticks(sides = "bl") +
    labs(
-    title   = paste0(param_species, " - Power law: Width ~ Mass^b"),
+    title   = "Power law: Width ~ Mass^b",
     x       = "Mass (g, log10 scale)",
     y       = "Width (mm, log10 scale)",
     caption = make_caption(loop_power_mass, "Power-law width vs mass.", param_species)
@@ -544,9 +603,11 @@ for (param_species in names(combined_all)) {
    loop_fit_pw   <- lm(log(Width_mm) ~ log(Mass_g), data = loop_power_mass)
    loop_coefs_pw <- coef(loop_fit_pw)
    loop_r2_pw    <- summary(loop_fit_pw)$r.squared
+   
    loop_b_pw     <- unname(loop_coefs_pw[["log(Mass_g)"]])  # exponent b
    loop_log_a_pw <- unname(loop_coefs_pw[["(Intercept)"]])
-   loop_a_pw     <- exp(loop_log_a_pw)                      # coefficient a
+   loop_a_pw     <- exp(loop_log_a_pw)  # coefficient a
+   
 
    # Predict on original scale across observed Mass range
    loop_rng_x_mass <- range(loop_power_mass$Mass_g, na.rm = TRUE)
@@ -564,6 +625,17 @@ for (param_species in names(combined_all)) {
                             " · Mass^", formatC(loop_b_pw, format = "f", digits = 3),
                             "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Width ~ Mass^b",
+    n              = nrow(loop_power_mass),
+    intercept_a    = loop_a_pw,
+    slope_b        = loop_b_pw,
+    `R^2`          = loop_r2_pw,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", loop_a_pw), " · Mass^", sprintf("%.4f", loop_b_pw)
+    )
+   ))
   }
 
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (log scale OK) ----
@@ -626,7 +698,7 @@ for (param_species in names(combined_all)) {
             y = -Inf, yend = Inf,
             colour = "#238b45", linetype = "dashed", linewidth = 1.0, lineend = "butt") +
    labs(
-    title   = paste0(param_species, " - Histogram of Fork Length"),
+    title   = "Histogram of Fork Length",
     x       = "Fork Length (mm)",
     y       = "Count",
     caption = make_caption(
@@ -668,14 +740,20 @@ for (param_species in names(combined_all)) {
    (plots[[param_species]][["scatter_fl"]]   | plots[[param_species]][["loglog_width_by_FL"]])  /
    (plots[[param_species]][["scatter_mass"]] | plots[[param_species]][["powerlaw_width_by_mass"]]) &
    ggplot2::theme(
-    plot.title   = ggplot2::element_text(size = 9, face = "plain"),  # short sub-plot titles
-    plot.caption = ggplot2::element_blank()                          # redundant at panel level
+    plot.title   = ggplot2::element_text(size = 9, face = "plain"),
+    plot.caption = ggplot2::element_blank(),
+    
+    # shrink axes ONLY for patchwork subplots
+    axis.title.x = ggplot2::element_text(size = 9),
+    axis.title.y = ggplot2::element_text(size = 9),
+    axis.text.x  = ggplot2::element_text(size = 7),
+    axis.text.y  = ggplot2::element_text(size = 7)
    )
-
+  
   # Step 2: add panel-level title, letter tags (a)-(f), and histogram caption footer.
   plots[[param_species]][["patchwork"]] <- loop_pw +
    patchwork::plot_annotation(
-    title      = param_species,
+    title      = species_common_name,
     caption    = if (!is.na(loop_hist_caption)) loop_hist_caption else NULL,
     tag_levels = "a", tag_prefix = "(", tag_suffix = ")",
     theme      = ggplot2::theme(
@@ -690,7 +768,6 @@ for (param_species in names(combined_all)) {
 
  cat("Finished:", if (nzchar(param_species)) param_species else "UNKNOWN_SPECIES", "\n")
 } # end species loop
-
 
 
 ##### Multi-species plots #####################################----
@@ -732,8 +809,8 @@ df_combined_fl <- df_all %>%
 
 plots[["combined"]][["width_by_FL"]] <- ggplot(df_combined_fl, aes(ForkLength_mm, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- geom_smooth(method = "lm", se = FALSE) +
- labs(title = "All species - Width by Fork Length (linear)",
+ geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
+ labs(title = "Width by Fork Length (linear)",
       x = "Fork Length (mm)", y = "Width (mm)") +
  theme(legend.position = "bottom")
 
@@ -747,8 +824,8 @@ df_combined_mass_logx <- df_all %>%
 
 plots[["combined"]][["width_by_mass_logx"]] <- ggplot(df_combined_mass_logx, aes(Mass_g, Width_mm, color = Species)) +
  geom_point(alpha = 0.5, size = 1.8) +
- stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE) +
- labs(title = "All species - Width by Mass (log x)",
+ stat_smooth(method = "lm", formula = y ~ log(x), se = FALSE, show.legend = FALSE) +
+ labs(title = "Width by Mass (log x)",
       x = "Mass (g)", y = "Width (mm)") +
  theme(legend.position = "bottom")
 
@@ -768,15 +845,14 @@ plots[["combined"]][["loglog_width_by_FL"]] <-
  scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
  scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
  annotation_logticks(sides = "bl") +
- labs(title = "All species - log(Width) ~ log(Fork Length)",
+ labs(title = "log(Width) ~ log(Fork Length)",
       x = "Fork Length (mm, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
 
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
-  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
-              mapping = aes(x = ForkLength_mm, y = Width_mm),
-              inherit.aes = FALSE, color = "black")
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(group = 1), color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
   geom_smooth(method = "lm", se = FALSE)
@@ -798,15 +874,14 @@ plots[["combined"]][["powerlaw_width_by_mass"]] <-
  scale_x_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
  scale_y_log10(breaks = scales::log_breaks(n = 10), labels = scales::label_comma()) +
  annotation_logticks(sides = "bl") +
- labs(title = "All species - Power law: Width ~ Mass^b",
+ labs(title = "Power law: Width ~ Mass^b",
       x = "Mass (g, log10 scale)", y = "Width (mm, log10 scale)") +
  theme(legend.position = "bottom")
 
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
-  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
-              mapping = aes(x = Mass_g, y = Width_mm),
-              inherit.aes = FALSE, color = "black")
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(group = 1), color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
   geom_smooth(method = "lm", se = FALSE)
@@ -880,6 +955,7 @@ df_species_counts <- df_all %>%
 
 
 
+
 ##### Exports #################################################----
 #-------------------------------------------------------------#
 
@@ -913,6 +989,7 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # readr::write_csv(df_combined_models,  file.path(path_tables_dir, "_combined_log_model_coefficients.csv"))
 # readr::write_csv(df_species_counts,   file.path(path_tables_dir, "_species_counts_raw_vs_filtered.csv"))
 
+
 # Per-species individual plot export (one file per plot per species)
 # for (sp in names(combined_all)) for (nm in names(plots[[sp]]))
 #  ggsave(file.path(path_figs_dir, paste0(gsub("[^A-Za-z0-9_\\-]", "_", sp), "_", nm, ".png")),
@@ -930,6 +1007,6 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # objects from the multi-species section.
 loop_temp_vars <- ls(pattern = "^(loop_|temp_|sp_qual_)")
 if (length(loop_temp_vars)) rm(list = loop_temp_vars)
-rm(model_row, make_caption)
+rm(make_caption)
 
 cat("\nAll plots complete.\n")

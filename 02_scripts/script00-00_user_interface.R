@@ -37,3 +37,10 @@ source("02_scripts/script01-02_morphology_plots.R")
 #           df_combined_summary          (descriptive stats per species)
 #           df_combined_models           (power-law coefficients per species)
 #           df_species_counts            (raw vs filtered sample sizes)
+
+# [4] Extra table exports (Summary statistics, model results) 
+source("02_scripts/script01-03_species_tables.R")
+# Produces: Species_morphology_summary.xlsx   (descriptive stats by species)
+#           morphology_model_results.xlsx     (model coefficients, R², equations)
+
+
