@@ -68,7 +68,7 @@ if (!dir.exists(path_tables_dir)) dir.create(path_tables_dir, recursive = TRUE, 
 
 # Initialize containers for results and plots
 df_combined_summary <- tibble()
-df_combined_models  <- tibble()  # collects coefficients for Width ~ log(Mass) model
+df_combined_models  <- tibble()  # collects per-species model coefficients (all 5 relationships)
 plots <- list()                  # nested list of plots
 plots[["combined"]] <- list()    # ensure multi-species plot container exists
 
@@ -240,6 +240,17 @@ for (param_species in names(combined_all)) {
              x = quantile(loop_scatter_fl$ForkLength_mm, 0.05, na.rm = TRUE),
              y = quantile(loop_scatter_fl$Width_mm,      0.95, na.rm = TRUE),
              label = loop_eq_fl, hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Width ~ Fork Length",
+    n              = nrow(loop_scatter_fl),
+    intercept_a    = loop_int_fl,
+    slope_b        = loop_slope_fl,
+    `R^2`          = loop_r2_fl,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", loop_slope_fl), " · FL + ", sprintf("%.4f", loop_int_fl)
+    )
+   ))
   }
 
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm ----
@@ -271,16 +282,6 @@ for (param_species in names(combined_all)) {
  loop_scatter_mass <- df_clean %>%
   dplyr::filter(!is.na(Width_mm), Width_mm > 0,
                 !is.na(Mass_g),   Mass_g   > 0)
-
- # Prepare a model-row so we can append even if we don't fit
- model_row <- tibble(
-  species = param_species,
-  n_used  = nrow(loop_scatter_mass),
-  a       = NA_real_,
-  b       = NA_real_,
-  r2      = NA_real_,
-  method  = NA_character_
- )
 
  if (nrow(loop_scatter_mass) >= MIN_N_PER_SPECIES) {
 
@@ -349,6 +350,17 @@ for (param_species in names(combined_all)) {
              y = quantile(loop_scatter_mass$Mass_g,   0.95, na.rm = TRUE),
              label = paste0("Mass = ", a_lbl, " · Width^", b_lbl, r2_lbl),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Mass ~ Width",
+    n              = nrow(loop_scatter_mass),
+    intercept_a    = fit_info$a,
+    slope_b        = fit_info$b,
+    `R^2`          = fit_info$r2,
+    Equation       = paste0(
+     "Mass = ", sprintf("%.2e", fit_info$a), " · Width^", sprintf("%.4f", fit_info$b)
+    )
+   ))
   }
 
   if (is.finite(max(loop_scatter_mass$Width_mm, na.rm = TRUE)) &&
@@ -378,7 +390,6 @@ for (param_species in names(combined_all)) {
  }
 
  plots[[param_species]][["scatter_mass"]] <- loop_p_scatter_mass
- df_combined_models <- dplyr::bind_rows(df_combined_models, model_row)
 
 
  #### Plot 3: Mass ~ Fork Length (power-law, raw scale) ####----
@@ -463,6 +474,17 @@ for (param_species in names(combined_all)) {
      label = paste0("Mass = ", a_lbl, " · FL^", b_lbl, r2_lbl),
      hjust = 0, vjust = 1, size = 3.5
     )
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Mass ~ Fork Length",
+    n              = nrow(loop_fl_mass),
+    intercept_a    = fit_info$a,
+    slope_b        = fit_info$b,
+    `R^2`          = fit_info$r2,
+    Equation       = paste0(
+     "Mass = ", sprintf("%.2e", fit_info$a), " · FL^", sprintf("%.4f", fit_info$b)
+    )
+   ))
   }
 
  } else {
@@ -529,6 +551,17 @@ for (param_species in names(combined_all)) {
                             "\nslope = ", formatC(loop_slope_ll, format = "f", digits = 3),
                             "  R^2 = ", formatC(loop_r2_ll, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "log(Width) ~ log(Fork Length)",
+    n              = nrow(loop_loglog_fl),
+    intercept_a    = exp(loop_int_ll),
+    slope_b        = loop_slope_ll,
+    `R^2`          = loop_r2_ll,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", exp(loop_int_ll)), " · FL^", sprintf("%.4f", loop_slope_ll)
+    )
+   ))
   }
  } else {
   loop_p_loglog_fl <- ggplot() + theme_void() +
@@ -592,6 +625,17 @@ for (param_species in names(combined_all)) {
                             " · Mass^", formatC(loop_b_pw, format = "f", digits = 3),
                             "\nR^2 = ", formatC(loop_r2_pw, format = "f", digits = 3)),
              hjust = 0, vjust = 1, size = 3.5)
+   df_combined_models <- dplyr::bind_rows(df_combined_models, tibble(
+    `Species name` = param_species,
+    Relationship   = "Width ~ Mass^b",
+    n              = nrow(loop_power_mass),
+    intercept_a    = loop_a_pw,
+    slope_b        = loop_b_pw,
+    `R^2`          = loop_r2_pw,
+    Equation       = paste0(
+     "Width = ", sprintf("%.4f", loop_a_pw), " · Mass^", sprintf("%.4f", loop_b_pw)
+    )
+   ))
   }
 
   # ---- Dashed 50 mm line ONLY if the data reach >= 50 mm (log scale OK) ----
@@ -807,9 +851,8 @@ plots[["combined"]][["loglog_width_by_FL"]] <-
 
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
-  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
-              mapping = aes(x = ForkLength_mm, y = Width_mm),
-              inherit.aes = FALSE, color = "black")
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(group = 1), color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
  plots[["combined"]][["loglog_width_by_FL"]] <- plots[["combined"]][["loglog_width_by_FL"]] +
   geom_smooth(method = "lm", se = FALSE)
@@ -837,9 +880,8 @@ plots[["combined"]][["powerlaw_width_by_mass"]] <-
 
 if (COMBINED_TREND_MODE == "overall") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
-  stat_smooth(method = "lm", formula = y ~ x, se = FALSE,
-              mapping = aes(x = Mass_g, y = Width_mm),
-              inherit.aes = FALSE, color = "black")
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              mapping = aes(group = 1), color = "black")
 } else if (COMBINED_TREND_MODE == "per_species") {
  plots[["combined"]][["powerlaw_width_by_mass"]] <- plots[["combined"]][["powerlaw_width_by_mass"]] +
   geom_smooth(method = "lm", se = FALSE)
@@ -965,6 +1007,6 @@ ggsave(file.path(path_figs_dir, "combined_hist_FL_by_species.png"),
 # objects from the multi-species section.
 loop_temp_vars <- ls(pattern = "^(loop_|temp_|sp_qual_)")
 if (length(loop_temp_vars)) rm(list = loop_temp_vars)
-rm(model_row, make_caption)
+rm(make_caption)
 
 cat("\nAll plots complete.\n")
