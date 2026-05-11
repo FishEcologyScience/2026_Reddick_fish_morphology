@@ -1,5 +1,3 @@
-library(tidyverse)
-
 poor_naming_scheme_range <- df_all %>%
   dplyr::filter(!is.na(ForkLength_mm)) %>%
   dplyr::group_by(Species) %>%
