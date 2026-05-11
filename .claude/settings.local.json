@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:\\\\Users\\\\Administrator\\\\Documents\\\\01_claude_workflow\\\\01_directory_R_projects\\\\01_directory_GitHub\\\\2026_Reddick_fish_morphology\" log --oneline -1)",
+      "Bash(git -C \"c:\\\\Users\\\\Administrator\\\\Documents\\\\01_claude_workflow\\\\01_directory_R_projects\\\\01_directory_GitHub\\\\2026_Reddick_fish_morphology\" status --short)"
+    ]
+  }
+}
