@@ -37,7 +37,7 @@ library(patchwork)   # combine multiple ggplots into panels
 
 ##### Helper functions ########################################----
 source("02_scripts/01_functions/function01-01_helper_functions.R")
-
+source("02_scripts/01_functions/function01-02_git_functions.R")
 
 ##### Global settings #########################################----
 options(scipen = 999)    # suppress scientific notation
