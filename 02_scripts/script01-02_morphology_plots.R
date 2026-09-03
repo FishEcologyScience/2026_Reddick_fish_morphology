@@ -931,6 +931,31 @@ plots[["combined"]][["patchwork"]] <- temp_combined_pw +
 
 cat("Multi-species plots complete.\n")
 
+#### Combined patchwork panel - simplified ####----
+# Layout: scatter pairs in rows 1-2, faceted histogram full-width in row 3.
+# Two-step assignment: & theme() applied before + plot_annotation() to prevent
+# the panel title from being stripped (same pattern as per-species patchwork).
+temp_combined_pw_simplified <-
+ (plots[["combined"]][["width_by_FL"]]) /
+ (plots[["combined"]][["width_by_mass_logx"]]) &
+ ggplot2::theme(
+  plot.title      = ggplot2::element_text(size = 9, face = "plain"),
+  plot.caption    = ggplot2::element_blank(),
+  legend.position = "bottom"
+ )
+
+plots[["combined"]][["patchwork.simplified"]] <- temp_combined_pw_simplified +
+ patchwork::plot_layout(guides = "collect") +
+ patchwork::plot_annotation(
+  title      = "All species — morphology overview",
+  tag_levels = "a", tag_prefix = "(", tag_suffix = ")",
+  theme      = ggplot2::theme(
+   plot.title = ggplot2::element_text(size = TITLE_SIZE + 2, face = "bold")
+  )
+ )
+
+cat("Simplified multi-species plots complete.\n")
+
 # Send all plots to the RStudio Plots/Viewer pane.
 # To view a single plot without printing all, use e.g.:
 #   plots[["Goldfish"]][["scatter_fl"]]
@@ -938,6 +963,7 @@ cat("Multi-species plots complete.\n")
 #   print(plots)
 for (sp in names(combined_all)) if (!is.null(plots[[sp]][["patchwork"]])) print(plots[[sp]][["patchwork"]])
 print(plots[["combined"]][["patchwork"]])
+print(plots[["combined"]][["patchwork.simplified"]])
 
 
 
@@ -971,6 +997,8 @@ for (sp in names(combined_all)) {
 # Combined patchwork panel export
 ggsave(file.path(path_figs_dir, "combined_patchwork.png"),
        plots[["combined"]][["patchwork"]], width = 12, height = 10, dpi = 300)
+ggsave(file.path(path_figs_dir, "combined_patchwork.simplified.png"),
+       plots[["combined"]][["patchwork.simplified"]], width = 8, height = 10, dpi = 300)
 
 # Combined (multi-species) individual plot exports
 ggsave(file.path(path_figs_dir, "combined_width_by_FL.png"),

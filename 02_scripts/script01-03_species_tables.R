@@ -84,6 +84,7 @@ species_lookup <- readxl::read_excel(species_lookup_path) |>
 #   - Does NOT apply minimum-n filters (summary only)
 #
 # This table is intended for reporting, QA/QC, and overview use.
+# Expanded variables in this table to provide complete summary for additional metrics (width, mass)
 
 df_species_summary <- purrr::imap_dfr(
  combined_all,
@@ -108,10 +109,25 @@ df_species_summary <- purrr::imap_dfr(
    else suppressWarnings(max(df_clean$ForkLength_mm, na.rm = TRUE)),
    
    FL_mean_mm    = mean(df_clean$ForkLength_mm, na.rm = TRUE),
-   Width_mean_mm = mean(df_clean$Width_mm,      na.rm = TRUE),
+   FL_sd_mm   = stats::sd(df_clean$ForkLength_mm, na.rm = TRUE),
    
    # Width SD retained as a simple indication of spread/variability
-   Width_sd_mm   = stats::sd(df_clean$Width_mm, na.rm = TRUE)
+   Width_min_mm     = if (all(is.na(df_clean$Width_mm))) NA_real_
+   else suppressWarnings(min(df_clean$Width_mm, na.rm = TRUE)),
+   Width_max_mm     = if (all(is.na(df_clean$Width_mm))) NA_real_
+   else suppressWarnings(max(df_clean$Width_mm, na.rm = TRUE)),
+   
+   Width_mean_mm    = mean(df_clean$Width_mm, na.rm = TRUE),
+   Width_sd_mm   = stats::sd(df_clean$Width_mm, na.rm = TRUE),
+   
+   # Mass
+   Mass_min_mm     = if (all(is.na(df_clean$Mass_g))) NA_real_
+   else suppressWarnings(min(df_clean$Mass_g, na.rm = TRUE)),
+   Mass_max_mm     = if (all(is.na(df_clean$Mass_g))) NA_real_
+   else suppressWarnings(max(df_clean$Mass_g, na.rm = TRUE)),
+   
+   Mass_mean_mm    = mean(df_clean$Mass_g, na.rm = TRUE),
+   Mass_sd_mm   = stats::sd(df_clean$Mass_g, na.rm = TRUE)
   )
  }
 )
@@ -169,6 +185,16 @@ df_species_summary <- df_species_summary |>
    is.na(FL_min_mm) | is.na(FL_max_mm),
    NA_character_,
    paste0(round(FL_min_mm), "–", round(FL_max_mm))
+  ),
+  `Width range (mm)` = dplyr::if_else(
+   is.na(Width_min_mm) | is.na(Width_max_mm),
+   NA_character_,
+   paste0(round(Width_min_mm), "–", round(Width_max_mm))
+  ),
+  `Mass range (mm)` = dplyr::if_else(
+   is.na(Mass_min_mm) | is.na(Mass_max_mm),
+   NA_character_,
+   paste0(round(Mass_min_mm), "–", round(Mass_max_mm))
   )
  ) |>
  dplyr::select(
@@ -176,13 +202,21 @@ df_species_summary <- df_species_summary |>
   `n`,
   `Fork length range (mm)`,
   `Mean fork length (mm)`  = FL_mean_mm,
+  `SD fork length (mm)`    = FL_sd_mm,
+  `Width range (mm)`,
   `Mean width (mm)`        = Width_mean_mm,
-  `SD width (mm)`          = Width_sd_mm
+  `SD width (mm)`          = Width_sd_mm,
+  `Mass range (mm)`,
+  `Mean Mass (mm)`         = Mass_mean_mm,
+  `SD Mass (mm)`           = Mass_sd_mm
  ) |>
  dplyr::mutate(
   `Mean fork length (mm)` = round(`Mean fork length (mm)`, 1),
+  `SD fork length (mm)`   = round(`SD fork length (mm)`, 1),
   `Mean width (mm)`       = round(`Mean width (mm)`, 1),
-  `SD width (mm)`         = round(`SD width (mm)`, 1)
+  `SD width (mm)`         = round(`SD width (mm)`, 1),
+  `Mean Mass (mm)`        = round(`Mean Mass (mm)`, 1),
+  `SD Mass (mm)`          = round(`SD Mass (mm)`, 1)
  ) |>
  dplyr::arrange(dplyr::desc(n))
 
