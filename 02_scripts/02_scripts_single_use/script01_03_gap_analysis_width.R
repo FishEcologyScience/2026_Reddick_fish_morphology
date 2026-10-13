@@ -95,3 +95,4 @@ cat("\nGap table () complete.\n")
 
 ## Optional export:
  write.csv(df_width_gap, "03_outputs/01_tables/width_gap_table.csv", row.names = FALSE)
+ 
